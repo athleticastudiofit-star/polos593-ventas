@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polos593 — Ventas & Stock</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f0f;--surface:#1a1a1a;--surface2:#242424;--border:#2e2e2e;
+  --text:#f0ede8;--soft:#8a8a8a;--gold:#c9a84c;--green:#22c55e;--red:#ef4444;
+  --yellow:#eab308;--blue:#3b82f6;--pink:#ec4899;--font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit}
+
+/* Login */
+#login{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;z-index:1000;padding:1.5rem}
+#login h1{color:var(--gold);font-size:22px}
+#login input,#login select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:.8rem 1rem;border-radius:10px;font-size:16px;width:260px;outline:none;text-align:center}
+#login button{background:var(--gold);color:#000;border:none;padding:.8rem 1rem;border-radius:10px;font-weight:600;width:260px;font-size:16px}
+.login-err{color:var(--red);font-size:13px;min-height:18px}
+
+/* App shell */
+#app{display:none;min-height:100vh;padding-bottom:70px}
+.topbar{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--border);padding:.8rem 1rem;display:flex;align-items:center;justify-content:space-between;z-index:50}
+.topbar .brand{font-weight:700;color:var(--gold)}
+.topbar .who{font-size:12px;color:var(--soft)}
+.main{padding:1rem;max-width:900px;margin:0 auto}
+
+/* Bottom nav (mobile-first) */
+.nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);display:flex;z-index:50}
+.nav button{flex:1;background:none;border:none;color:var(--soft);padding:.7rem;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:.2rem}
+.nav button.active{color:var(--gold)}
+.nav button svg{width:22px;height:22px}
+
+/* Cards / general */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}
+h2.page{font-size:18px;font-weight:600;margin-bottom:1rem}
+.muted{color:var(--soft)}
+.row{display:flex;gap:.6rem;align-items:center}
+.btn{padding:.6rem 1rem;border-radius:9px;border:none;font-weight:600;font-size:14px}
+.btn-gold{background:var(--gold);color:#000}
+.btn-green{background:var(--green);color:#000}
+.btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-red{background:var(--red);color:#fff}
+.btn:disabled{opacity:.5}
+input.fld,select.fld{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:.6rem .7rem;border-radius:8px;font-size:14px;width:100%;outline:none}
+input.fld:focus,select.fld:focus{border-color:var(--gold)}
+label.lbl{font-size:12px;color:var(--soft);display:block;margin-bottom:.25rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:20px;font-size:11px;font-weight:600}
+.b-local{background:rgba(59,130,246,.15);color:var(--blue)}
+.b-drop{background:rgba(236,72,153,.15);color:var(--pink)}
+.b-low{background:rgba(239,68,68,.18);color:var(--red)}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:.7rem 1.2rem;border-radius:10px;font-weight:600;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;text-align:center}
+.toast.show{opacity:1}
+
+/* Vender: buscador y carrito */
+.prod-pick{display:flex;justify-content:space-between;align-items:center;padding:.55rem .3rem;border-bottom:1px solid var(--border);gap:.5rem}
+.prod-pick small{color:var(--soft)}
+.pick-add{background:var(--gold);color:#000;border:none;border-radius:7px;width:34px;height:34px;font-size:20px;font-weight:700;flex-shrink:0}
+.cart-line{display:flex;align-items:center;gap:.5rem;padding:.5rem 0;border-bottom:1px solid var(--border)}
+.qtybox{display:flex;align-items:center;gap:.3rem}
+.qtybox button{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:16px;font-weight:700}
+.seg{display:flex;gap:.4rem}
+.seg button{flex:1;padding:.6rem;border-radius:9px;border:1px solid var(--border);background:var(--surface2);color:var(--soft);font-weight:600}
+.seg button.on{background:var(--gold);color:#000;border-color:var(--gold)}
+.totline{display:flex;justify-content:space-between;padding:.3rem 0}
+.totline.big{font-size:18px;font-weight:700;border-top:1px solid var(--border);margin-top:.4rem;padding-top:.6rem}
+.gain{color:var(--green)}
+
+/* Tablas */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--soft);padding:.5rem .4rem;border-bottom:1px solid var(--border)}
+td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
+.cell-in{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.3rem;width:62px;text-align:right;font-size:13px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:1rem}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.9rem}
+.kpi .v{font-size:24px;font-weight:700}
+.kpi .l{font-size:11px;color:var(--soft);text-transform:uppercase}
+.bar-row{display:flex;align-items:center;gap:.5rem;margin:.3rem 0;font-size:12px}
+.bar-track{flex:1;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;background:var(--gold)}
+.empty{text-align:center;color:var(--soft);padding:2rem 1rem}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <h1>🦁 Polos593 — Ventas</h1>
+  <select id="login-vendedor" class="fld" style="width:260px"><option value="">Cargando vendedores…</option></select>
+  <input id="login-pin" type="tel" inputmode="numeric" placeholder="PIN de acceso" maxlength="8">
+  <button onclick="doLogin()">Entrar</button>
+  <div class="login-err" id="login-err"></div>
+  <div class="muted" style="font-size:11px">Tu acceso queda guardado en este dispositivo</div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div class="topbar">
+    <span class="brand">🦁 Polos593</span>
+    <div style="display:flex;align-items:center;gap:.6rem">
+      <span class="who" id="who"></span>
+      <button onclick="logout()" style="background:var(--surface2);border:1px solid var(--border);color:var(--soft);padding:.35rem .7rem;border-radius:8px;font-size:12px;cursor:pointer">Salir</button>
+    </div>
+  </div>
+  <div class="main" id="view"></div>
+  <div class="nav">
+    <button data-tab="vender" class="active" onclick="go('vender')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>
+      Vender
+    </button>
+    <button data-tab="inventario" onclick="go('inventario')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>
+      Inventario
+    </button>
+    <button data-tab="reportes" onclick="go('reportes')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Reportes
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://zopeclhjnlfpgldflarp.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_EzKXkvdHpyPs_m_76J9kZg_l3BJIoor';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const ENVIO = { guayaquil: 3.50, provincia: 6.50 };
+const BAILEYS_URL = 'https://whatsapp-baileys-production-3e0b.up.railway.app';
+const ADMIN_NAMES = ['Homero'];          // quién ve Reportes e Inventario
+let VENDEDOR = localStorage.getItem('p593_vendedor') || '';
+let ES_ADMIN = localStorage.getItem('p593_admin') === '1';
+let CONFIG = {};                          // pin, pin_admin, whatsapp_admin
+let cart = [];
+let productosCache = [];
+
+const money = n => '$' + (Number(n)||0).toFixed(2);
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+
+// ── LOGIN ──
+async function initLogin(){
+  const { data } = await db.from('vendedores').select('nombre').eq('activo',true).order('nombre');
+  const sel = document.getElementById('login-vendedor');
+  sel.innerHTML = '<option value="">Elige tu nombre…</option>' + (data||[]).map(v=>`<option>${v.nombre}</option>`).join('');
+  if (VENDEDOR && localStorage.getItem('p593_auth')==='1'){
+    // Admin con sesión vieja sin rol guardado → pedir de nuevo el PIN de admin
+    if (ADMIN_NAMES.includes(VENDEDOR) && localStorage.getItem('p593_admin')!=='1'){
+      localStorage.removeItem('p593_auth');
+      sel.value = VENDEDOR;
+      return;
+    }
+    ES_ADMIN = localStorage.getItem('p593_admin')==='1';
+    enterApp();
+  }
+}
+async function loadConfig(){
+  const { data } = await db.from('config').select('*');
+  CONFIG = {}; (data||[]).forEach(c=>CONFIG[c.clave]=c.valor);
+}
+async function doLogin(){
+  const v = document.getElementById('login-vendedor').value;
+  const pin = document.getElementById('login-pin').value.trim();
+  const err = document.getElementById('login-err');
+  if(!v){ err.textContent='Elige tu nombre'; return; }
+  await loadConfig();
+  const esAdmin = ADMIN_NAMES.includes(v);
+  const pinOk = esAdmin ? (pin === (CONFIG.pin_admin||'5930')) : (pin === (CONFIG.pin||'0593'));
+  if(!pinOk){ err.textContent = esAdmin ? 'PIN de administrador incorrecto' : 'PIN incorrecto'; return; }
+  VENDEDOR = v; ES_ADMIN = esAdmin;
+  localStorage.setItem('p593_vendedor', v);
+  localStorage.setItem('p593_admin', esAdmin?'1':'0');
+  localStorage.setItem('p593_auth','1');
+  enterApp();
+}
+async function enterApp(){
+  if(!Object.keys(CONFIG).length) await loadConfig();
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('who').textContent = (ES_ADMIN?'👑 ':'👤 ')+VENDEDOR;
+  // Asesores: solo Vender. Admin (Homero): todas las pantallas.
+  document.querySelectorAll('.nav button').forEach(b=>{
+    const t=b.dataset.tab;
+    b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes')) ? 'none' : '';
+  });
+  go('vender');
+}
+function logout(){ localStorage.removeItem('p593_auth'); location.reload(); }
+
+// ── NAV ──
+let TAB='vender';
+function go(tab){
+  if(!ES_ADMIN && (tab==='inventario'||tab==='reportes')) tab='vender'; // asesor: solo Vender
+  TAB=tab;
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  if(tab==='vender') renderVender();
+  if(tab==='inventario') renderInventario();
+  if(tab==='reportes') renderReportes();
+}
+
+async function loadProductos(){
+  const { data } = await db.from('productos').select('*').eq('activo',true).order('nombre');
+  productosCache = data||[];
+  return productosCache;
+}
+
+// ════════════ VENDER ════════════
+async function renderVender(){
+  const v=document.getElementById('view');
+  v.innerHTML='<div class="empty">Cargando…</div>';
+  await loadProductos();
+  v.innerHTML = `
+    <h2 class="page">Nueva venta</h2>
+    <div class="card">
+      <input class="fld" id="buscar" placeholder="🔎 Buscar por código, nombre o color…" oninput="filtrarProd(this.value)">
+      <div id="prod-list" style="margin-top:.6rem;max-height:230px;overflow:auto"></div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><b>🛒 Carrito</b><span class="muted" id="cart-count">0 items</span></div>
+      <div id="cart"></div>
+    </div>
+    <div class="card" id="checkout" style="display:none">
+      <label class="lbl">Tipo de venta</label>
+      <div class="seg" style="margin-bottom:.8rem">
+        <button id="t-local" class="on" onclick="setTipo('local')">🏬 Local</button>
+        <button id="t-drop" onclick="setTipo('dropshipping')">📦 Dropshipping</button>
+      </div>
+      <div id="drop-fields" style="display:none">
+        <div class="grid2" style="margin-bottom:.7rem">
+          <div><label class="lbl">Cliente</label><input class="fld" id="c-nombre" placeholder="Nombre"></div>
+          <div><label class="lbl">Teléfono</label><input class="fld" id="c-tel" placeholder="09…"></div>
+        </div>
+        <div class="grid2" style="margin-bottom:.7rem">
+          <div><label class="lbl">Ciudad</label><input class="fld" id="c-ciudad" placeholder="Ciudad"></div>
+          <div><label class="lbl">Zona de envío</label>
+            <select class="fld" id="zona" onchange="calcTotales()">
+              <option value="guayaquil">Guayaquil ($3.50)</option>
+              <option value="provincia">Provincia ($6.50)</option>
+            </select>
+          </div>
+        </div>
+        <label class="lbl">¿Quién paga el envío?</label>
+        <div class="seg" style="margin-bottom:.4rem">
+          <button id="e-cli" class="on" onclick="setEnvio('cliente')">Cliente paga</button>
+          <button id="e-free" onclick="setEnvio('gratis')">Gratis (promo)</button>
+        </div>
+      </div>
+      <label class="lbl">Descuento (opcional)</label>
+      <div class="seg" style="margin-bottom:.5rem">
+        <button id="d-no" class="on" onclick="setDesc('no')">Sin desc.</button>
+        <button id="d-pct" onclick="setDesc('porcentaje')">% Porcentaje</button>
+        <button id="d-fin" onclick="setDesc('monto_final')">$ Precio final</button>
+      </div>
+      <input class="fld" id="desc-val" type="number" step="0.5" style="display:none;margin-bottom:.6rem" oninput="calcTotales()">
+      <div style="margin:.6rem 0"><label class="lbl">Método de pago</label>
+        <select class="fld" id="pago"><option>Efectivo</option><option>Transferencia</option><option>Otro</option></select>
+      </div>
+      <div id="totales"></div>
+      <button class="btn btn-green" style="width:100%;margin-top:.8rem;padding:.9rem" id="btn-vender" onclick="registrarVenta()">✅ Registrar venta</button>
+    </div>
+  `;
+  filtrarProd('');
+  renderCart();
+}
+function filtrarProd(q){
+  q=q.toLowerCase().trim();
+  const list = productosCache.filter(p =>
+    p.sku.toLowerCase().includes(q) || (p.nombre||'').toLowerCase().includes(q) ||
+    (p.color||'').toLowerCase().includes(q) || (p.talla||'').toLowerCase().includes(q));
+  const el=document.getElementById('prod-list');
+  if(!el) return;
+  el.innerHTML = list.length===0 ? '<div class="empty">Sin productos. Agrégalos en Inventario.</div>' :
+    list.slice(0,40).map(p=>`
+      <div class="prod-pick">
+        <div>
+          <div>${p.nombre} · ${p.color||''} · <b>${p.talla||''}</b></div>
+          <small>${p.sku} — ${money(p.precio_venta)} · stock ${p.stock}</small>
+        </div>
+        <button class="pick-add" onclick="addCart('${p.sku}')">+</button>
+      </div>`).join('');
+}
+function addCart(sku){
+  const p=productosCache.find(x=>x.sku===sku);
+  if(!p) return;
+  const ex=cart.find(c=>c.sku===sku);
+  if(ex) ex.cantidad++;
+  else cart.push({sku:p.sku, nombre:p.nombre, talla:p.talla, color:p.color, cantidad:1, precio_unit:+p.precio_venta, costo_unit:+p.costo});
+  renderCart();
+}
+function chgQty(sku,d){
+  const c=cart.find(x=>x.sku===sku); if(!c) return;
+  c.cantidad+=d; if(c.cantidad<=0) cart=cart.filter(x=>x.sku!==sku);
+  renderCart();
+}
+function renderCart(){
+  const el=document.getElementById('cart'); if(!el) return;
+  document.getElementById('cart-count').textContent = cart.reduce((s,c)=>s+c.cantidad,0)+' items';
+  document.getElementById('checkout').style.display = cart.length? 'block':'none';
+  el.innerHTML = cart.length===0 ? '<div class="empty">Agrega productos arriba</div>' :
+    cart.map(c=>`
+      <div class="cart-line">
+        <div style="flex:1">
+          <div>${c.nombre} · ${c.color||''} · <b>${c.talla||''}</b></div>
+          <small class="muted">${c.sku} · ${money(c.precio_unit)} c/u</small>
+        </div>
+        <div class="qtybox">
+          <button onclick="chgQty('${c.sku}',-1)">−</button>
+          <span style="min-width:22px;text-align:center">${c.cantidad}</span>
+          <button onclick="chgQty('${c.sku}',1)">+</button>
+        </div>
+        <div style="min-width:60px;text-align:right">${money(c.precio_unit*c.cantidad)}</div>
+      </div>`).join('');
+  if(cart.length) calcTotales();
+}
+let TIPO='local', ENVIO_MODO='cliente', DESC_TIPO='no';
+function setDesc(t){
+  DESC_TIPO=t;
+  document.getElementById('d-no').classList.toggle('on',t==='no');
+  document.getElementById('d-pct').classList.toggle('on',t==='porcentaje');
+  document.getElementById('d-fin').classList.toggle('on',t==='monto_final');
+  const inp=document.getElementById('desc-val');
+  inp.style.display = t==='no'?'none':'block';
+  inp.placeholder = t==='porcentaje'?'% de descuento (ej: 10)':'Precio final de los productos ($)';
+  if(t==='no') inp.value='';
+  calcTotales();
+}
+function setTipo(t){
+  TIPO=t;
+  document.getElementById('t-local').classList.toggle('on',t==='local');
+  document.getElementById('t-drop').classList.toggle('on',t==='dropshipping');
+  document.getElementById('drop-fields').style.display = t==='dropshipping'?'block':'none';
+  calcTotales();
+}
+function setEnvio(m){
+  ENVIO_MODO=m;
+  document.getElementById('e-cli').classList.toggle('on',m==='cliente');
+  document.getElementById('e-free').classList.toggle('on',m==='gratis');
+  calcTotales();
+}
+function calcTotales(){
+  const subtotal = cart.reduce((s,c)=>s+c.precio_unit*c.cantidad,0);
+  const costo = cart.reduce((s,c)=>s+c.costo_unit*c.cantidad,0);
+  // Descuento: por porcentaje o por precio final de los productos
+  let descuentoMonto=0, descTipo=null, descVal=0;
+  const dv = parseFloat((document.getElementById('desc-val')||{}).value)||0;
+  if(DESC_TIPO==='porcentaje' && dv>0){ descTipo='porcentaje'; descVal=Math.min(dv,100); descuentoMonto = subtotal*descVal/100; }
+  else if(DESC_TIPO==='monto_final' && dv>0){ descTipo='monto_final'; descVal=dv; descuentoMonto = Math.max(0, subtotal-dv); }
+  const subtotalNeto = subtotal - descuentoMonto;
+  let costoEnvio=0, envioCobrado=0;
+  if(TIPO==='dropshipping'){
+    const zona=document.getElementById('zona').value;
+    costoEnvio=ENVIO[zona];
+    envioCobrado = ENVIO_MODO==='cliente'? costoEnvio : 0;
+  }
+  const total = subtotalNeto + envioCobrado;
+  const ganancia = subtotalNeto - costo + envioCobrado - costoEnvio;
+  const el=document.getElementById('totales');
+  if(el) el.innerHTML = `
+    <div class="totline"><span class="muted">Productos</span><span>${money(subtotal)}</span></div>
+    ${descuentoMonto>0?`<div class="totline"><span class="muted">Descuento ${descTipo==='porcentaje'?'('+descVal+'%)':''}</span><span style="color:var(--red)">-${money(descuentoMonto)}</span></div>`:''}
+    ${TIPO==='dropshipping'?`<div class="totline"><span class="muted">Envío cobrado al cliente</span><span>${money(envioCobrado)}</span></div>
+      <div class="totline"><span class="muted">Costo de envío (lo pagas tú)</span><span>-${money(costoEnvio)}</span></div>`:''}
+    <div class="totline big"><span>Total a cobrar</span><span>${money(total)}</span></div>
+    ${ES_ADMIN?`<div class="totline"><span class="muted">Tu ganancia</span><span class="gain">${money(ganancia)}</span></div>`:''}`;
+  return {subtotal,costo,descuentoMonto,descTipo,descVal,costoEnvio,envioCobrado,total,ganancia};
+}
+async function registrarVenta(){
+  if(!cart.length) return;
+  const btn=document.getElementById('btn-vender'); btn.disabled=true; btn.textContent='Guardando…';
+  const t=calcTotales();
+  const zona = TIPO==='dropshipping'? document.getElementById('zona').value : null;
+  const venta = {
+    tipo:TIPO, vendedor:VENDEDOR,
+    cliente_nombre: TIPO==='dropshipping'? (document.getElementById('c-nombre').value||null):null,
+    cliente_telefono: TIPO==='dropshipping'? (document.getElementById('c-tel').value||null):null,
+    ciudad: TIPO==='dropshipping'? (document.getElementById('c-ciudad').value||null):null,
+    zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
+    descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
+    subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
+    metodo_pago:document.getElementById('pago').value
+  };
+  const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();
+  if(error){ toast('Error: '+error.message); btn.disabled=false; btn.textContent='✅ Registrar venta'; return; }
+  const esLocal = TIPO==='local';
+  const items = cart.map(c=>({venta_id:vRow.id, sku:c.sku, nombre:c.nombre, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit, es_local:esLocal}));
+  await db.from('venta_items').insert(items);
+  const folio = vRow.folio;
+  cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no';
+  // Asesor → pantalla para compartir la venta a Homero por WhatsApp.
+  // Admin (Homero) → solo confirma, no necesita compartirse a sí mismo.
+  if(!ES_ADMIN) mostrarCompartir(folio, venta, items);
+  else { toast('✅ Venta #'+folio+' registrada'); renderVender(); }
+}
+// Link wa.me que abre la conversación con Homero y el mensaje ya escrito.
+// OJO: el texto lo ve el asesor, por eso NO incluye la ganancia.
+function waLink(venta, items, folio){
+  const num = (CONFIG.whatsapp_admin||'593983209216').replace(/\D/g,'');
+  const lineas = items.map(i=>`• ${i.cantidad}x ${i.nombre} ${i.talla||''} (${money(i.precio_unit)})`).join('\n');
+  const canal = venta.tipo==='dropshipping'
+    ? `📦 DROPSHIPPING — ${venta.ciudad||''}${venta.cliente_nombre?' · '+venta.cliente_nombre:''}${venta.cliente_telefono?' · '+venta.cliente_telefono:''}`
+    : '🏬 LOCAL';
+  const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
+  const msg = `🧾 NUEVA VENTA #${folio}\n${canal}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+}
+function mostrarCompartir(folio, venta, items){
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="text-align:center;margin-top:1.5rem">
+      <div style="font-size:52px">✅</div>
+      <h2 class="page" style="margin:.4rem 0">Venta #${folio} registrada</h2>
+      <p class="muted" style="margin-bottom:1.3rem">Toca para compartir el detalle a Homero — se abrirá tu WhatsApp con el mensaje listo</p>
+      <a class="btn btn-green" style="display:block;padding:1rem;text-decoration:none;font-size:16px" href="${waLink(venta,items,folio)}" target="_blank" rel="noopener">📲 Compartir a WhatsApp</a>
+      <button class="btn btn-ghost" style="width:100%;margin-top:.8rem;padding:.85rem" onclick="renderVender()">➕ Registrar otra venta</button>
+    </div>`;
+}
+
+// ════════════ INVENTARIO ════════════
+async function renderInventario(){
+  const v=document.getElementById('view');
+  v.innerHTML='<div class="empty">Cargando inventario…</div>';
+  const { data } = await db.from('productos').select('*').order('tipo').order('color').order('talla');
+  const prods=data||[];
+  const totalUnid = prods.reduce((s,p)=>s+(p.stock||0),0);
+  const valorStock = prods.reduce((s,p)=>s+(p.stock||0)*(+p.costo||0),0);
+  v.innerHTML = `
+    <h2 class="page">Inventario <span class="muted" style="font-size:13px">(${prods.length} SKUs · ${totalUnid} uds)</span></h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Unidades en stock</div><div class="v">${totalUnid}</div></div>
+      <div class="kpi"><div class="l">Valor del stock (costo)</div><div class="v">${money(valorStock)}</div></div>
+    </div>
+    <div class="card">
+      <input class="fld" id="inv-buscar" placeholder="🔎 Buscar…" oninput="filtInv(this.value)" style="margin-bottom:.6rem">
+      <div style="overflow:auto"><table id="inv-tbl"><thead><tr>
+        <th>Producto</th><th>Color/Talla</th><th>Costo</th><th>Precio</th><th>Stock</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <button class="btn btn-ghost" style="width:100%" onclick="nuevoProducto()">+ Agregar producto / SKU</button>
+  `;
+  window._inv=prods; filtInv('');
+}
+function filtInv(q){
+  q=q.toLowerCase().trim();
+  const rows=(window._inv||[]).filter(p=>!q || p.sku.toLowerCase().includes(q)||(p.nombre||'').toLowerCase().includes(q)||(p.color||'').toLowerCase().includes(q));
+  const tb=document.querySelector('#inv-tbl tbody'); if(!tb) return;
+  tb.innerHTML = rows.map(p=>`
+    <tr>
+      <td>${p.nombre}<br><small class="muted">${p.sku}</small></td>
+      <td>${p.color||''}<br><b>${p.talla||''}</b></td>
+      <td><input class="cell-in" type="number" step="0.5" value="${(+p.costo).toFixed(2)}" onchange="updProd('${p.sku}','costo',this.value)"></td>
+      <td><input class="cell-in" type="number" step="0.5" value="${(+p.precio_venta).toFixed(2)}" onchange="updProd('${p.sku}','precio_venta',this.value)"></td>
+      <td><input class="cell-in ${p.stock<=2?'':''}" type="number" value="${p.stock}" onchange="updProd('${p.sku}','stock',this.value)" style="${p.stock<=2?'border-color:var(--red);color:var(--red)':''}"></td>
+    </tr>`).join('');
+}
+async function updProd(sku,campo,val){
+  const upd={}; upd[campo]= campo==='stock'? parseInt(val)||0 : parseFloat(val)||0;
+  await db.from('productos').update(upd).eq('sku',sku);
+  const p=(window._inv||[]).find(x=>x.sku===sku); if(p) p[campo]=upd[campo];
+  toast('Guardado');
+}
+async function nuevoProducto(){
+  const sku=prompt('Código SKU (ej: CM-BLA-M):'); if(!sku) return;
+  const nombre=prompt('Nombre (ej: Camisa Manga Larga Polo RL Mujer):')||'Producto';
+  const color=prompt('Color:')||'';
+  const talla=prompt('Talla (S/M/L/XL):')||'';
+  const costo=parseFloat(prompt('Costo:')||'0')||0;
+  const precio=parseFloat(prompt('Precio de venta:')||'0')||0;
+  const stock=parseInt(prompt('Stock inicial:')||'0')||0;
+  const { error }=await db.from('productos').insert({sku,nombre,color,talla,costo,precio_venta:precio,stock,tipo:'otro',genero:'unisex'});
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Producto agregado'); renderInventario();
+}
+
+// ════════════ REPORTES (con rango de fechas) ════════════
+let REP_DESDE=null, REP_HASTA=null, REP_LABEL='Hoy';
+function rangoPreset(p){
+  const now=new Date(); const d0=new Date(); d0.setHours(0,0,0,0);
+  if(p==='hoy'){ REP_DESDE=d0; REP_HASTA=now; REP_LABEL='Hoy'; }
+  else if(p==='ayer'){ const a=new Date(d0); a.setDate(a.getDate()-1); REP_DESDE=a; REP_HASTA=new Date(d0.getTime()-1); REP_LABEL='Ayer'; }
+  else if(p==='7'){ const a=new Date(d0); a.setDate(a.getDate()-6); REP_DESDE=a; REP_HASTA=now; REP_LABEL='Últimos 7 días'; }
+  else if(p==='30'){ const a=new Date(d0); a.setDate(a.getDate()-29); REP_DESDE=a; REP_HASTA=now; REP_LABEL='Últimos 30 días'; }
+  else if(p==='mes'){ REP_DESDE=new Date(now.getFullYear(),now.getMonth(),1); REP_HASTA=now; REP_LABEL='Este mes'; }
+  renderReportes();
+}
+function rangoCustom(){
+  const d=document.getElementById('rep-desde').value, h=document.getElementById('rep-hasta').value;
+  if(d) REP_DESDE=new Date(d+'T00:00:00');
+  if(h) REP_HASTA=new Date(h+'T23:59:59');
+  REP_LABEL='Personalizado';
+  renderReportes();
+}
+const fmtFecha = dt => { const z=new Date(dt.getTime()-dt.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); };
+async function renderReportes(){
+  if(!REP_DESDE){ const d0=new Date(); d0.setHours(0,0,0,0); REP_DESDE=d0; REP_HASTA=new Date(); }
+  const v=document.getElementById('view');
+  v.innerHTML='<div class="empty">Calculando…</div>';
+  const { data } = await db.from('ventas').select('*').eq('anulada',false)
+    .gte('fecha',REP_DESDE.toISOString()).lte('fecha',REP_HASTA.toISOString()).order('fecha',{ascending:false});
+  const ventas=data||[];
+  const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
+  const ingresos=sum(ventas,'total'), ganancia=sum(ventas,'ganancia'), descuentos=sum(ventas,'descuento_monto');
+  const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
+  const porDia={}, porVend={};
+  ventas.forEach(x=>{
+    const d=x.fecha.slice(0,10); porDia[d]=porDia[d]||{n:0,ing:0,gan:0}; porDia[d].n++; porDia[d].ing+=+x.total; porDia[d].gan+=+x.ganancia;
+    const k=x.vendedor||'—'; porVend[k]=porVend[k]||{n:0,gan:0}; porVend[k].n++; porVend[k].gan+=+x.ganancia;
+  });
+  const dias=Object.entries(porDia).sort((a,b)=>b[0].localeCompare(a[0]));
+  const maxIng=Math.max(1,...dias.map(d=>d[1].ing));
+
+  v.innerHTML = `
+    <h2 class="page">Reportes</h2>
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.7rem">
+        ${[['hoy','Hoy'],['ayer','Ayer'],['7','7 días'],['30','30 días'],['mes','Este mes']].map(([p,l])=>
+          `<button class="filter-btn" onclick="rangoPreset('${p}')" style="padding:.4rem .8rem;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px">${l}</button>`).join('')}
+      </div>
+      <div class="grid2">
+        <div><label class="lbl">Desde</label><input class="fld" type="date" id="rep-desde" value="${fmtFecha(REP_DESDE)}" onchange="rangoCustom()"></div>
+        <div><label class="lbl">Hasta</label><input class="fld" type="date" id="rep-hasta" value="${fmtFecha(REP_HASTA)}" onchange="rangoCustom()"></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:.6rem">📅 <b>${REP_LABEL}</b> · ${ventas.length} ventas</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Ventas</div><div class="v">${ventas.length}</div></div>
+      <div class="kpi"><div class="l">Ingresos</div><div class="v">${money(ingresos)}</div></div>
+      <div class="kpi"><div class="l">Ganancia</div><div class="v gain">${money(ganancia)}</div></div>
+      <div class="kpi"><div class="l">Descuentos dados</div><div class="v" style="color:var(--red);font-size:20px">${money(descuentos)}</div></div>
+    </div>
+    <div class="card">
+      <b>Por canal</b>
+      <div class="totline" style="margin-top:.5rem"><span><span class="badge b-local">LOCAL</span> ${local.length} ventas</span><span class="gain">${money(sum(local,'ganancia'))}</span></div>
+      <div class="totline"><span><span class="badge b-drop">DROPSHIP</span> ${drop.length} ventas</span><span class="gain">${money(sum(drop,'ganancia'))}</span></div>
+    </div>
+    <div class="card">
+      <b>Ventas día a día</b>
+      <div style="margin-top:.6rem">
+      ${dias.length===0?'<div class="empty">Sin ventas en este rango</div>':dias.map(([d,o])=>`
+        <div class="bar-row"><span style="width:54px">${d.slice(5)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${o.ing/maxIng*100}%"></div></div>
+          <span style="width:62px;text-align:right">${money(o.ing)}</span>
+          <span class="gain" style="width:58px;text-align:right">+${money(o.gan)}</span>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <b>Por vendedor</b>
+      <table style="margin-top:.5rem"><tbody>
+      ${Object.entries(porVend).map(([k,o])=>`<tr><td>${k}</td><td>${o.n} ventas</td><td style="text-align:right" class="gain">${money(o.gan)}</td></tr>`).join('')||'<tr><td class="empty">—</td></tr>'}
+      </tbody></table>
+    </div>
+    <div class="card">
+      <b>Ventas del rango</b>
+      <table style="margin-top:.5rem"><thead><tr><th>#</th><th>Tipo</th><th>Vendedor</th><th>Total</th><th>Gan.</th></tr></thead><tbody>
+      ${ventas.slice(0,40).map(x=>`<tr>
+        <td>${x.folio}</td>
+        <td><span class="badge ${x.tipo==='local'?'b-local':'b-drop'}">${x.tipo==='local'?'LOC':'DROP'}</span></td>
+        <td>${x.vendedor||'—'}</td>
+        <td>${money(x.total)}</td>
+        <td class="gain">${money(x.ganancia)}</td>
+      </tr>`).join('')||'<tr><td colspan=5 class="empty">Sin ventas</td></tr>'}
+      </tbody></table>
+    </div>
+  `;
+}
+
+// ── init ──
+initLogin();
+</script>
+</body>
+</html>

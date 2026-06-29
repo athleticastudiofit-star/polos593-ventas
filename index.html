@@ -559,6 +559,20 @@ async function renderReportes(){
   const topSku=Object.entries(porSku).sort((a,b)=>b[1].qty-a[1].qty).slice(0,8);
   const maxQty=Math.max(1,...topSku.map(s=>s[1].qty));
   const topTalla=Object.entries(porTalla).sort((a,b)=>b[1]-a[1]);
+  // comisiones: $ por prenda, solo vendedores que NO son admin (Homero). dropship vs local
+  const COM_LOCAL=parseFloat(CONFIG.comision_local||'1'), COM_DROP=parseFloat(CONFIG.comision_dropship||'2');
+  const comByVend={};
+  ventas.forEach(v=>{
+    if(ADMIN_NAMES.includes(v.vendedor)) return;
+    const units=(itemsByVenta[v.id]||[]).reduce((s,i)=>s+i.cantidad,0);
+    const tarifa=v.tipo==='dropshipping'?COM_DROP:COM_LOCAL;
+    const k=v.vendedor||'—';
+    comByVend[k]=comByVend[k]||{units:0,com:0,uLocal:0,uDrop:0};
+    comByVend[k].units+=units; comByVend[k].com+=units*tarifa;
+    if(v.tipo==='dropshipping') comByVend[k].uDrop+=units; else comByVend[k].uLocal+=units;
+  });
+  const comList=Object.entries(comByVend).sort((a,b)=>b[1].com-a[1].com);
+  const comTotal=comList.reduce((s,e)=>s+e[1].com,0);
   const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
   const ingresos=sum(ventas,'total'), ganancia=sum(ventas,'ganancia'), descuentos=sum(ventas,'descuento_monto');
   const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
@@ -612,6 +626,14 @@ async function renderReportes(){
       </tbody></table>
     </div>
     <div class="card">
+      <b>💵 Comisiones a pagar</b> <span class="muted" style="font-size:12px">— $${COM_DROP.toFixed(0)}/prenda dropship · $${COM_LOCAL.toFixed(0)}/prenda local (no aplica a Homero)</span>
+      ${comList.length===0?'<div class="empty">Sin comisiones en este rango</div>':`
+      <table style="margin-top:.5rem"><thead><tr><th>Vendedor</th><th>Prendas</th><th style="text-align:right">A pagar</th></tr></thead><tbody>
+      ${comList.map(([k,o])=>`<tr><td>${k}<br><small class="muted">${o.uLocal} local · ${o.uDrop} dropship</small></td><td>${o.units}</td><td style="text-align:right;font-weight:700;color:var(--gold)">${money(o.com)}</td></tr>`).join('')}
+      <tr><td><b>TOTAL</b></td><td><b>${comList.reduce((s,e)=>s+e[1].units,0)}</b></td><td style="text-align:right;font-weight:700;color:var(--gold)">${money(comTotal)}</td></tr>
+      </tbody></table>`}
+    </div>
+    <div class="card">
       <b>🔥 Lo más vendido</b> <span class="muted" style="font-size:12px">— para saber qué reabastecer</span>
       <div style="margin-top:.6rem">
       ${topSku.length===0?'<div class="empty">Aún no hay ventas en este rango</div>':topSku.map(([sku,o])=>`
@@ -655,6 +677,7 @@ function verVenta(id){
     ${v.tipo==='dropshipping'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
     <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}
+    ${(()=>{ if(ADMIN_NAMES.includes(v.vendedor)) return ''; const u=its.reduce((s,i)=>s+i.cantidad,0); const com=u*(v.tipo==='dropshipping'?parseFloat(CONFIG.comision_dropship||'2'):parseFloat(CONFIG.comision_local||'1')); return com>0?`<div class="totline"><span class="muted">Comisión ${v.vendedor}</span><span style="color:var(--gold)">${money(com)}</span></div>`:''; })()}
     <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>`;
   showModal(html);
 }

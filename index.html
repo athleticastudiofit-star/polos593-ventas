@@ -58,6 +58,17 @@ label.lbl{font-size:12px;color:var(--soft);display:block;margin-bottom:.25rem}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:.7rem 1.2rem;border-radius:10px;font-weight:600;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;text-align:center}
 .toast.show{opacity:1}
 
+/* Asistente guiado de venta */
+.wz-step{font-size:16px;font-weight:600;margin-bottom:.5rem}
+.wz-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.wz-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:12px;padding:.9rem .5rem;font-size:14px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;min-height:74px;text-align:center;line-height:1.2}
+.wz-btn:active{border-color:var(--gold);background:#2c2c2c}
+.wz-btn .sub{font-size:11px;color:var(--soft);font-weight:400}
+.wz-swatch{width:28px;height:28px;border-radius:50%;border:2px solid var(--border)}
+.wz-crumb{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.7rem}
+.wz-crumb span{background:rgba(201,168,76,.12);color:var(--gold);padding:.22rem .6rem;border-radius:20px;font-size:12px;font-weight:600}
+.wz-back{background:none;border:none;color:var(--soft);font-size:13px;cursor:pointer;margin-left:auto;padding:.2rem .4rem}
+
 /* Vender: buscador y carrito */
 .prod-pick{display:flex;justify-content:space-between;align-items:center;padding:.55rem .3rem;border-bottom:1px solid var(--border);gap:.5rem}
 .prod-pick small{color:var(--soft)}
@@ -220,8 +231,7 @@ async function renderVender(){
   v.innerHTML = `
     <h2 class="page">Nueva venta</h2>
     <div class="card">
-      <input class="fld" id="buscar" placeholder="🔎 Buscar por código, nombre o color…" oninput="filtrarProd(this.value)">
-      <div id="prod-list" style="margin-top:.6rem;max-height:230px;overflow:auto"></div>
+      <div id="wizard"></div>
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between"><b>🛒 Carrito</b><span class="muted" id="cart-count">0 items</span></div>
@@ -267,25 +277,48 @@ async function renderVender(){
       <button class="btn btn-green" style="width:100%;margin-top:.8rem;padding:.9rem" id="btn-vender" onclick="registrarVenta()">✅ Registrar venta</button>
     </div>
   `;
-  filtrarProd('');
+  SEL={genero:null,prenda:null,color:null};
+  renderWizard();
   renderCart();
 }
-function filtrarProd(q){
-  q=q.toLowerCase().trim();
-  const list = productosCache.filter(p =>
-    p.sku.toLowerCase().includes(q) || (p.nombre||'').toLowerCase().includes(q) ||
-    (p.color||'').toLowerCase().includes(q) || (p.talla||'').toLowerCase().includes(q));
-  const el=document.getElementById('prod-list');
-  if(!el) return;
-  el.innerHTML = list.length===0 ? '<div class="empty">Sin productos. Agrégalos en Inventario.</div>' :
-    list.slice(0,40).map(p=>`
-      <div class="prod-pick">
-        <div>
-          <div>${p.nombre} · ${p.color||''} · <b>${p.talla||''}</b></div>
-          <small>${p.sku} — ${money(p.precio_venta)} · stock ${p.stock}</small>
-        </div>
-        <button class="pick-add" onclick="addCart('${p.sku}')">+</button>
-      </div>`).join('');
+
+// ── Asistente guiado de selección: Género → Prenda → Color → Talla ──
+let SEL={genero:null,prenda:null,color:null};
+const PRENDA_LABEL={camisa_mujer:'Camisa Manga Larga',camisa_hombre:'Camisa Manga Larga',polo_pique:'Polo Piqué RL',camiseta_rl:'Camiseta Redonda Polo RL',camiseta_lacoste:'Camiseta Redonda Lacoste'};
+const PRENDA_ICON={camisa_mujer:'👔',camisa_hombre:'👔',polo_pique:'🎽',camiseta_rl:'👕',camiseta_lacoste:'👕'};
+const COLOR_HEX={'Blanco':'#f5f5f5','Negro':'#1a1a1a','Celeste claro':'#a8d8ea','Navy':'#1b2a4a','Azul Marino':'#1b2a4a','Rosa pastel':'#f4c2c2','Amarillo':'#f4d03f','Gris Jaspe':'#9e9e9e','Verde Oliva':'#6b7a3a','Rojo Intenso':'#c0392b'};
+const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
+
+const prodsGenero = g => productosCache.filter(p => p.genero===g || p.genero==='unisex');
+function pickGenero(g){ SEL={genero:g,prenda:null,color:null}; renderWizard(); }
+function pickPrenda(t){ SEL.prenda=t; SEL.color=null; renderWizard(); }
+function pickColor(c){ SEL.color=c; renderWizard(); }
+function pickTalla(sku){ addCart(sku); SEL={genero:SEL.genero,prenda:null,color:null}; toast('✓ Agregado al carrito'); renderWizard(); }
+function wizardBack(){ if(SEL.color) SEL.color=null; else if(SEL.prenda) SEL.prenda=null; else SEL.genero=null; renderWizard(); }
+
+function renderWizard(){
+  const el=document.getElementById('wizard'); if(!el) return;
+  const crumb = `<div class="wz-crumb">${SEL.genero?`<span>${SEL.genero==='mujer'?'👩 Mujer':'👨 Hombre'}</span>`:''}${SEL.prenda?`<span>${PRENDA_LABEL[SEL.prenda]}</span>`:''}${SEL.color?`<span>${SEL.color}</span>`:''}${(SEL.genero?`<button class="wz-back" onclick="wizardBack()">‹ Volver</button>`:'')}</div>`;
+  let body='';
+  if(!SEL.genero){
+    body=`<div class="wz-step">¿Para quién es?</div>
+      <div class="wz-grid">
+        <button class="wz-btn" onclick="pickGenero('mujer')"><span style="font-size:30px">👩</span>Mujer</button>
+        <button class="wz-btn" onclick="pickGenero('hombre')"><span style="font-size:30px">👨</span>Hombre</button>
+      </div>`;
+  } else if(!SEL.prenda){
+    const tipos=[...new Set(prodsGenero(SEL.genero).map(p=>p.tipo))];
+    body=`<div class="wz-step">¿Qué prenda?</div><div class="wz-grid">${tipos.map(t=>`<button class="wz-btn" onclick="pickPrenda('${t}')"><span style="font-size:26px">${PRENDA_ICON[t]||'👕'}</span>${PRENDA_LABEL[t]||t}</button>`).join('')}</div>`;
+  } else if(!SEL.color){
+    const colores=[...new Set(prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda).map(p=>p.color))];
+    body=`<div class="wz-step">¿Qué color?</div><div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${colores.map(c=>`<button class="wz-btn" onclick="pickColor('${c.replace(/'/g,"\\'")}')"><span class="wz-swatch" style="background:${COLOR_HEX[c]||'#888'}"></span><span style="font-size:12px">${c}</span></button>`).join('')}</div>`;
+  } else {
+    const opts=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda && p.color===SEL.color).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
+    const precio=opts[0]?money(opts[0].precio_venta):'';
+    body=`<div class="wz-step">¿Qué talla? <span class="muted" style="font-size:13px;font-weight:400">· ${precio}</span></div>
+      <div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">${opts.map(p=>`<button class="wz-btn" style="min-height:64px" onclick="pickTalla('${p.sku}')"><span style="font-size:22px;font-weight:700">${p.talla}</span><span class="sub">stock ${p.stock}</span></button>`).join('')}</div>`;
+  }
+  el.innerHTML = crumb + body;
 }
 function addCart(sku){
   const p=productosCache.find(x=>x.sku===sku);

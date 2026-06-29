@@ -98,6 +98,10 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
 .bar-track{flex:1;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}
 .bar-fill{height:100%;background:var(--gold)}
 .empty{text-align:center;color:var(--soft);padding:2rem 1rem}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:flex-end;justify-content:center}
+.modal-bg.open{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:16px 16px 0 0;padding:1.2rem;width:100%;max-width:520px;max-height:85vh;overflow:auto}
+@media(min-width:600px){.modal-bg{align-items:center}.modal-box{border-radius:16px}}
 </style>
 </head>
 <body>
@@ -139,6 +143,7 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeModal()"><div class="modal-box" id="modal-box"></div></div>
 
 <script>
 const SUPABASE_URL = 'https://zopeclhjnlfpgldflarp.supabase.co';
@@ -285,7 +290,7 @@ async function renderVender(){
 let SEL={genero:null,prenda:null,color:null};
 const PRENDA_LABEL={camisa_mujer:'Camisa Manga Larga',camisa_hombre:'Camisa Manga Larga',polo_pique:'Polo Piqué RL',polo_lacoste:'Polo Piqué Lacoste',camiseta_rl:'Camiseta Redonda Polo RL',camiseta_lacoste:'Camiseta Redonda Lacoste'};
 const PRENDA_ICON={camisa_mujer:'👔',camisa_hombre:'👔',polo_pique:'🎽',polo_lacoste:'🎽',camiseta_rl:'👕',camiseta_lacoste:'👕'};
-const COLOR_HEX={'Blanco':'#f5f5f5','Negro':'#1a1a1a','Celeste claro':'#a8d8ea','Navy':'#1b2a4a','Azul Marino':'#1b2a4a','Rosa pastel':'#f4c2c2','Amarillo':'#f4d03f','Gris Jaspe':'#9e9e9e','Verde Oliva':'#6b7a3a','Rojo Intenso':'#c0392b'};
+const COLOR_HEX={'Blanco':'#f5f5f5','Negro':'#1a1a1a','Celeste Claro':'#a8d8ea','Celeste claro':'#a8d8ea','Navy':'#1b2a4a','Azul Marino':'#1b2a4a','Rosa Pastel':'#f4c2c2','Rosa pastel':'#f4c2c2','Amarillo':'#f4d03f','Gris Jaspe':'#9e9e9e','Verde Oliva':'#6b7a3a','Rojo Intenso':'#a93226','Café':'#6f4e37','Turquesa':'#40e0d0','Rojo':'#c0392b','Azul Rey':'#1e3a8a','Naranja':'#e67e22','Celeste Cielo':'#87ceeb','Verde Bosque':'#1e7a3a','Verde Agua':'#2dd4bf','Celeste 2':'#b0e0e6','Verde Lima':'#a3e635','Gris Oscuro':'#555555','Verde Menta':'#98e8b0','Celeste Pastel':'#cce7f0'};
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
 
 const prodsGenero = g => productosCache.filter(p => p.genero===g || p.genero==='unisex');
@@ -309,8 +314,10 @@ function renderWizard(){
     const tipos=[...new Set(prodsGenero(SEL.genero).map(p=>p.tipo))];
     body=`<div class="wz-step">¿Qué prenda?</div><div class="wz-grid">${tipos.map(t=>`<button class="wz-btn" onclick="pickPrenda('${t}')"><span style="font-size:26px">${PRENDA_ICON[t]||'👕'}</span>${PRENDA_LABEL[t]||t}</button>`).join('')}</div>`;
   } else if(!SEL.color){
-    const colores=[...new Set(prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda).map(p=>p.color))];
-    body=`<div class="wz-step">¿Qué color?</div><div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${colores.map(c=>`<button class="wz-btn" onclick="pickColor('${c.replace(/'/g,"\\'")}')"><span class="wz-swatch" style="background:${COLOR_HEX[c]||'#888'}"></span><span style="font-size:12px">${c}</span></button>`).join('')}</div>`;
+    const subset=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda);
+    const byColor={}; subset.forEach(p=>{ byColor[p.color]=(byColor[p.color]||0)+p.stock; });
+    const colores=Object.keys(byColor).sort((a,b)=>byColor[b]-byColor[a]); // en tienda primero
+    body=`<div class="wz-step">¿Qué color?</div><div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${colores.map(c=>`<button class="wz-btn" onclick="pickColor('${c.replace(/'/g,"\\'")}')"><span class="wz-swatch" style="background:${COLOR_HEX[c]||'#888'}"></span><span style="font-size:11px">${c}</span><span class="sub" style="color:${byColor[c]>0?'var(--green)':'var(--soft)'}">${byColor[c]>0?'tienda '+byColor[c]:'catálogo'}</span></button>`).join('')}</div>`;
   } else {
     const opts=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda && p.color===SEL.color).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
     const precio=opts[0]?money(opts[0].precio_venta):'';
@@ -536,6 +543,22 @@ async function renderReportes(){
   const { data } = await db.from('ventas').select('*').eq('anulada',false)
     .gte('fecha',REP_DESDE.toISOString()).lte('fecha',REP_HASTA.toISOString()).order('fecha',{ascending:false});
   const ventas=data||[];
+  window._ventasCache=ventas;
+  // traer el detalle (items) de las ventas del rango
+  const ids=ventas.map(v=>v.id);
+  let items=[];
+  if(ids.length){ const {data:it}=await db.from('venta_items').select('*').in('venta_id',ids); items=it||[]; }
+  const itemsByVenta={}; items.forEach(i=>{ (itemsByVenta[i.venta_id]=itemsByVenta[i.venta_id]||[]).push(i); });
+  window._itemsByVenta=itemsByVenta;
+  // color por sku (para "lo más vendido")
+  if(!productosCache.length) await loadProductos();
+  const colorBySku={}; productosCache.forEach(p=>colorBySku[p.sku]=p.color);
+  // agregados de lo más vendido
+  const porSku={}, porTalla={};
+  items.forEach(i=>{ porSku[i.sku]=porSku[i.sku]||{nombre:i.nombre,talla:i.talla,color:colorBySku[i.sku]||'',qty:0}; porSku[i.sku].qty+=i.cantidad; porTalla[i.talla]=(porTalla[i.talla]||0)+i.cantidad; });
+  const topSku=Object.entries(porSku).sort((a,b)=>b[1].qty-a[1].qty).slice(0,8);
+  const maxQty=Math.max(1,...topSku.map(s=>s[1].qty));
+  const topTalla=Object.entries(porTalla).sort((a,b)=>b[1]-a[1]);
   const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
   const ingresos=sum(ventas,'total'), ganancia=sum(ventas,'ganancia'), descuentos=sum(ventas,'descuento_monto');
   const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
@@ -589,9 +612,20 @@ async function renderReportes(){
       </tbody></table>
     </div>
     <div class="card">
-      <b>Ventas del rango</b>
+      <b>🔥 Lo más vendido</b> <span class="muted" style="font-size:12px">— para saber qué reabastecer</span>
+      <div style="margin-top:.6rem">
+      ${topSku.length===0?'<div class="empty">Aún no hay ventas en este rango</div>':topSku.map(([sku,o])=>`
+        <div class="bar-row"><span style="flex:1;min-width:0">${o.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} · ${o.color} · <b>${o.talla}</b></span>
+          <div class="bar-track" style="max-width:90px"><div class="bar-fill" style="width:${o.qty/maxQty*100}%"></div></div>
+          <span style="width:34px;text-align:right;font-weight:600">${o.qty}</span>
+        </div>`).join('')}
+      </div>
+      ${topTalla.length?`<div style="margin-top:.7rem;font-size:12px;color:var(--soft)">Tallas más vendidas: ${topTalla.map(([t,n])=>`<b style="color:var(--text)">${t}</b> ${n}`).join(' · ')}</div>`:''}
+    </div>
+    <div class="card">
+      <b>Ventas del rango</b> <span class="muted" style="font-size:12px">— toca una para ver el detalle</span>
       <table style="margin-top:.5rem"><thead><tr><th>#</th><th>Tipo</th><th>Vendedor</th><th>Total</th><th>Gan.</th></tr></thead><tbody>
-      ${ventas.slice(0,40).map(x=>`<tr>
+      ${ventas.slice(0,40).map(x=>`<tr onclick="verVenta('${x.id}')" style="cursor:pointer">
         <td>${x.folio}</td>
         <td><span class="badge ${x.tipo==='local'?'b-local':'b-drop'}">${x.tipo==='local'?'LOC':'DROP'}</span></td>
         <td>${x.vendedor||'—'}</td>
@@ -602,6 +636,30 @@ async function renderReportes(){
     </div>
   `;
 }
+function verVenta(id){
+  const v=(window._ventasCache||[]).find(x=>x.id===id); if(!v) return;
+  const its=(window._itemsByVenta||{})[id]||[];
+  const cli=[v.cliente_nombre,v.cliente_telefono,v.ciudad].filter(Boolean).join(' · ');
+  const fecha=new Date(v.fecha).toLocaleString('es-EC',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  const html=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+      <h3 style="font-size:17px">Venta #${v.folio}</h3>
+      <button onclick="closeModal()" class="btn btn-ghost" style="padding:.3rem .7rem">✕</button>
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:.7rem">${fecha} · <span class="badge ${v.tipo==='local'?'b-local':'b-drop'}">${v.tipo==='local'?'LOCAL':'DROPSHIP'}</span> · ${v.vendedor||''}</div>
+    ${cli?`<div style="font-size:13px;margin-bottom:.6rem">🧍 <b>Cliente:</b> ${cli}</div>`:''}
+    <div style="border-top:1px solid var(--border);padding-top:.5rem">
+    ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
+    </div>
+    ${v.descuento_monto>0?`<div class="totline" style="color:var(--red)"><span>Descuento</span><span>-${money(v.descuento_monto)}</span></div>`:''}
+    ${v.tipo==='dropshipping'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
+    <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
+    ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}
+    <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>`;
+  showModal(html);
+}
+function showModal(html){ document.getElementById('modal-box').innerHTML=html; document.getElementById('modal').classList.add('open'); }
+function closeModal(){ document.getElementById('modal').classList.remove('open'); }
 
 // ── init ──
 initLogin();

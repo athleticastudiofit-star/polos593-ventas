@@ -243,19 +243,18 @@ async function renderVender(){
         <button id="t-local" class="on" onclick="setTipo('local')">🏬 Local</button>
         <button id="t-drop" onclick="setTipo('dropshipping')">📦 Dropshipping</button>
       </div>
+      <label class="lbl">Datos del cliente <span style="color:var(--soft)">(recomendado)</span></label>
+      <div class="grid2" style="margin-bottom:.6rem">
+        <input class="fld" id="c-nombre" placeholder="Nombre">
+        <input class="fld" id="c-tel" placeholder="Teléfono 09…">
+      </div>
+      <input class="fld" id="c-ciudad" placeholder="Ciudad" style="margin-bottom:.7rem">
       <div id="drop-fields" style="display:none">
-        <div class="grid2" style="margin-bottom:.7rem">
-          <div><label class="lbl">Cliente</label><input class="fld" id="c-nombre" placeholder="Nombre"></div>
-          <div><label class="lbl">Teléfono</label><input class="fld" id="c-tel" placeholder="09…"></div>
-        </div>
-        <div class="grid2" style="margin-bottom:.7rem">
-          <div><label class="lbl">Ciudad</label><input class="fld" id="c-ciudad" placeholder="Ciudad"></div>
-          <div><label class="lbl">Zona de envío</label>
-            <select class="fld" id="zona" onchange="calcTotales()">
-              <option value="guayaquil">Guayaquil ($3.50)</option>
-              <option value="provincia">Provincia ($6.50)</option>
-            </select>
-          </div>
+        <div style="margin-bottom:.7rem"><label class="lbl">Zona de envío</label>
+          <select class="fld" id="zona" onchange="calcTotales()">
+            <option value="guayaquil">Guayaquil ($3.50)</option>
+            <option value="provincia">Provincia ($6.50)</option>
+          </select>
         </div>
         <label class="lbl">¿Quién paga el envío?</label>
         <div class="seg" style="margin-bottom:.4rem">
@@ -284,8 +283,8 @@ async function renderVender(){
 
 // ── Asistente guiado de selección: Género → Prenda → Color → Talla ──
 let SEL={genero:null,prenda:null,color:null};
-const PRENDA_LABEL={camisa_mujer:'Camisa Manga Larga',camisa_hombre:'Camisa Manga Larga',polo_pique:'Polo Piqué RL',camiseta_rl:'Camiseta Redonda Polo RL',camiseta_lacoste:'Camiseta Redonda Lacoste'};
-const PRENDA_ICON={camisa_mujer:'👔',camisa_hombre:'👔',polo_pique:'🎽',camiseta_rl:'👕',camiseta_lacoste:'👕'};
+const PRENDA_LABEL={camisa_mujer:'Camisa Manga Larga',camisa_hombre:'Camisa Manga Larga',polo_pique:'Polo Piqué RL',polo_lacoste:'Polo Piqué Lacoste',camiseta_rl:'Camiseta Redonda Polo RL',camiseta_lacoste:'Camiseta Redonda Lacoste'};
+const PRENDA_ICON={camisa_mujer:'👔',camisa_hombre:'👔',polo_pique:'🎽',polo_lacoste:'🎽',camiseta_rl:'👕',camiseta_lacoste:'👕'};
 const COLOR_HEX={'Blanco':'#f5f5f5','Negro':'#1a1a1a','Celeste claro':'#a8d8ea','Navy':'#1b2a4a','Azul Marino':'#1b2a4a','Rosa pastel':'#f4c2c2','Amarillo':'#f4d03f','Gris Jaspe':'#9e9e9e','Verde Oliva':'#6b7a3a','Rojo Intenso':'#c0392b'};
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
 
@@ -412,9 +411,9 @@ async function registrarVenta(){
   const zona = TIPO==='dropshipping'? document.getElementById('zona').value : null;
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
-    cliente_nombre: TIPO==='dropshipping'? (document.getElementById('c-nombre').value||null):null,
-    cliente_telefono: TIPO==='dropshipping'? (document.getElementById('c-tel').value||null):null,
-    ciudad: TIPO==='dropshipping'? (document.getElementById('c-ciudad').value||null):null,
+    cliente_nombre: document.getElementById('c-nombre').value||null,
+    cliente_telefono: document.getElementById('c-tel').value||null,
+    ciudad: document.getElementById('c-ciudad').value||null,
     zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
@@ -437,11 +436,11 @@ async function registrarVenta(){
 function waLink(venta, items, folio){
   const num = (CONFIG.whatsapp_admin||'593983209216').replace(/\D/g,'');
   const lineas = items.map(i=>`• ${i.cantidad}x ${i.nombre} ${i.talla||''} (${money(i.precio_unit)})`).join('\n');
-  const canal = venta.tipo==='dropshipping'
-    ? `📦 DROPSHIPPING — ${venta.ciudad||''}${venta.cliente_nombre?' · '+venta.cliente_nombre:''}${venta.cliente_telefono?' · '+venta.cliente_telefono:''}`
-    : '🏬 LOCAL';
+  const canal = venta.tipo==='dropshipping' ? '📦 DROPSHIPPING' : '🏬 LOCAL';
+  const cli = [venta.cliente_nombre, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
+  const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
   const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
-  const msg = `🧾 NUEVA VENTA #${folio}\n${canal}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
+  const msg = `🧾 NUEVA VENTA #${folio}\n${canal}${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
 }
 function mostrarCompartir(folio, venta, items){

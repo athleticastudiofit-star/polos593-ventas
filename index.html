@@ -255,6 +255,8 @@ async function renderVender(){
       </div>
       <input class="fld" id="c-ciudad" placeholder="Ciudad" style="margin-bottom:.7rem">
       <div id="drop-fields" style="display:none">
+        <label class="lbl">Dirección exacta de envío</label>
+        <input class="fld" id="c-direccion" placeholder="Calle, número, referencia…" style="margin-bottom:.7rem">
         <div style="margin-bottom:.7rem"><label class="lbl">Zona de envío</label>
           <select class="fld" id="zona" onchange="calcTotales()">
             <option value="guayaquil">Guayaquil ($3.50)</option>
@@ -416,38 +418,56 @@ async function registrarVenta(){
   const btn=document.getElementById('btn-vender'); btn.disabled=true; btn.textContent='Guardando…';
   const t=calcTotales();
   const zona = TIPO==='dropshipping'? document.getElementById('zona').value : null;
+  const ciudad = document.getElementById('c-ciudad').value||null;
+  const direccion = TIPO==='dropshipping' ? (document.getElementById('c-direccion').value||null) : null;
+  // Dropshipping necesita destino para que la proveedora envíe
+  if(TIPO==='dropshipping' && (!ciudad || !direccion)){
+    toast('Falta ciudad y dirección de envío'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
+  }
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
     cliente_nombre: document.getElementById('c-nombre').value||null,
     cliente_telefono: document.getElementById('c-tel').value||null,
-    ciudad: document.getElementById('c-ciudad').value||null,
-    zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
+    ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
-    metodo_pago:document.getElementById('pago').value
+    metodo_pago:document.getElementById('pago').value,
+    notas: direccion  // guardamos la dirección exacta aquí
   };
   const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();
   if(error){ toast('Error: '+error.message); btn.disabled=false; btn.textContent='✅ Registrar venta'; return; }
   const esLocal = TIPO==='local';
   const items = cart.map(c=>({venta_id:vRow.id, sku:c.sku, nombre:c.nombre, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit, es_local:esLocal}));
   await db.from('venta_items').insert(items);
+  // datos para compartir (incluyen COLOR, que no se guarda en venta_items)
+  const shareItems = cart.map(c=>({nombre:c.nombre, color:c.color, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit}));
+  venta.direccion = direccion;
   const folio = vRow.folio;
   cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no';
-  // Asesor → pantalla para compartir la venta a Homero por WhatsApp.
-  // Admin (Homero) → solo confirma, no necesita compartirse a sí mismo.
-  if(!ES_ADMIN) mostrarCompartir(folio, venta, items);
+  // Asesor → pantalla para compartir a Homero. Admin → solo confirma.
+  if(!ES_ADMIN) mostrarCompartir(folio, venta, shareItems);
   else { toast('✅ Venta #'+folio+' registrada'); renderVender(); }
 }
 // Link wa.me que abre la conversación con Homero y el mensaje ya escrito.
 // OJO: el texto lo ve el asesor, por eso NO incluye la ganancia.
 function waLink(venta, items, folio){
   const num = (CONFIG.whatsapp_admin||'593983209216').replace(/\D/g,'');
-  const lineas = items.map(i=>`• ${i.cantidad}x ${i.nombre} ${i.talla||''} (${money(i.precio_unit)})`).join('\n');
-  const canal = venta.tipo==='dropshipping' ? '📦 DROPSHIPPING' : '🏬 LOCAL';
-  const cli = [venta.cliente_nombre, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
-  const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
-  const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
-  const msg = `🧾 NUEVA VENTA #${folio}\n${canal}${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
+  const corto = n => (n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const prenda = i => `• ${i.cantidad}x ${corto(i.nombre)} ${i.color||''} ${i.talla||''}`.replace(/ +/g,' ').trim();
+  let msg;
+  if(venta.tipo==='dropshipping'){
+    // Pedido para la proveedora: SIN precios de venta, con costo a pagar + envío + destino
+    const lineas = items.map(prenda).join('\n');
+    const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
+    const env = +venta.costo_envio||0;
+    msg = `📦 PEDIDO DROPSHIPPING #${folio}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(costoP+env)}*\n   Prendas ${money(costoP)} + Envío ${money(env)}\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}`;
+  } else {
+    const lineas = items.map(i=>`${prenda(i)} (${money(i.precio_unit)})`).join('\n');
+    const cli = [venta.cliente_nombre, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
+    const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
+    const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
+    msg = `🧾 NUEVA VENTA #${folio}\n🏬 LOCAL${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
+  }
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
 }
 function mostrarCompartir(folio, venta, items){
@@ -669,7 +689,8 @@ function verVenta(id){
       <button onclick="closeModal()" class="btn btn-ghost" style="padding:.3rem .7rem">✕</button>
     </div>
     <div class="muted" style="font-size:12px;margin-bottom:.7rem">${fecha} · <span class="badge ${v.tipo==='local'?'b-local':'b-drop'}">${v.tipo==='local'?'LOCAL':'DROPSHIP'}</span> · ${v.vendedor||''}</div>
-    ${cli?`<div style="font-size:13px;margin-bottom:.6rem">🧍 <b>Cliente:</b> ${cli}</div>`:''}
+    ${cli?`<div style="font-size:13px;margin-bottom:.3rem">🧍 <b>Cliente:</b> ${cli}</div>`:''}
+    ${v.tipo==='dropshipping'&&v.notas?`<div style="font-size:13px;margin-bottom:.6rem">🏠 <b>Dirección:</b> ${v.notas}</div>`:''}
     <div style="border-top:1px solid var(--border);padding-top:.5rem">
     ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
     </div>

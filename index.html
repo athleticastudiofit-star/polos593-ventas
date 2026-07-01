@@ -420,14 +420,15 @@ async function registrarVenta(){
   const zona = TIPO==='dropshipping'? document.getElementById('zona').value : null;
   const ciudad = document.getElementById('c-ciudad').value||null;
   const direccion = TIPO==='dropshipping' ? (document.getElementById('c-direccion').value||null) : null;
-  // Dropshipping necesita destino para que la proveedora envíe
-  if(TIPO==='dropshipping' && (!ciudad || !direccion)){
-    toast('Falta ciudad y dirección de envío'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
+  const telefono = document.getElementById('c-tel').value||null;
+  // Dropshipping necesita destino para que la proveedora envíe + teléfono para el CRM (aviso de guía)
+  if(TIPO==='dropshipping' && (!ciudad || !direccion || !telefono)){
+    toast('Dropshipping necesita teléfono, ciudad y dirección'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
   }
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
     cliente_nombre: document.getElementById('c-nombre').value||null,
-    cliente_telefono: document.getElementById('c-tel').value||null,
+    cliente_telefono: telefono,
     ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
@@ -443,10 +444,39 @@ async function registrarVenta(){
   const shareItems = cart.map(c=>({nombre:c.nombre, color:c.color, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit}));
   venta.direccion = direccion;
   const folio = vRow.folio;
+  await sincronizarCRM(venta, shareItems, folio);
   cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no';
   // Asesor → pantalla para compartir a Homero. Admin → solo confirma.
   if(!ES_ADMIN) mostrarCompartir(folio, venta, shareItems);
   else { toast('✅ Venta #'+folio+' registrada'); renderVender(); }
+}
+// Alimenta el CRM (mismo Supabase que usa crm-dashboard.html): cada venta de esta
+// app también queda como pedido en el CRM, para tener una sola fuente de verdad
+// entre las ventas web y los pedidos que llegan por conversación de WhatsApp.
+async function sincronizarCRM(venta, items, folio){
+  const phone = (venta.cliente_telefono||'').replace(/\D/g,'');
+  const statusCRM = venta.tipo==='local' ? 'entregado' : 'pagado';
+  if(phone){
+    try{
+      await db.from('clientes').upsert({
+        phone, name: venta.cliente_nombre||'Cliente', city: venta.ciudad||null,
+        status: statusCRM, source: 'ventas-app', last_contact: new Date().toISOString()
+      }, { onConflict: 'phone' });
+    }catch(e){ /* no bloquea el registro de la venta */ }
+  }
+  const corto = n => (n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const itemsPedido = items.map(i=>({ nombre:(i.cantidad>1?i.cantidad+'x ':'')+corto(i.nombre), color:i.color||'', talla:i.talla||'', precio:i.precio_unit }));
+  const notas = [
+    `Venta #${folio} · ${venta.tipo==='local'?'🏬 Local':'📦 Dropshipping'} · Vendedor: ${venta.vendedor}`,
+    venta.direccion ? `Dirección: ${venta.direccion}` : null,
+    venta.descuento_monto>0 ? `Descuento aplicado: -${money(venta.descuento_monto)}` : null
+  ].filter(Boolean).join(' — ');
+  try{
+    await db.from('pedidos').insert({
+      cliente_phone: phone||null, cliente_name: venta.cliente_nombre||null, ciudad: venta.ciudad||null,
+      items: itemsPedido, total: venta.total, status: statusCRM, asesor: venta.vendedor, notes: notas
+    });
+  }catch(e){ /* no bloquea el registro de la venta */ }
 }
 // Link wa.me que abre la conversación con Homero y el mensaje ya escrito.
 // OJO: el texto lo ve el asesor, por eso NO incluye la ganancia.

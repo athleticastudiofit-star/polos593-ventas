@@ -586,13 +586,15 @@ async function renderReportes(){
     if(ADMIN_NAMES.includes(v.vendedor)) return;
     const units=(itemsByVenta[v.id]||[]).reduce((s,i)=>s+i.cantidad,0);
     const tarifa=v.tipo==='dropshipping'?COM_DROP:COM_LOCAL;
+    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifa;
     const k=v.vendedor||'—';
     comByVend[k]=comByVend[k]||{units:0,com:0,uLocal:0,uDrop:0};
-    comByVend[k].units+=units; comByVend[k].com+=units*tarifa;
+    comByVend[k].units+=units; comByVend[k].com+=com;
     if(v.tipo==='dropshipping') comByVend[k].uDrop+=units; else comByVend[k].uLocal+=units;
   });
   const comList=Object.entries(comByVend).sort((a,b)=>b[1].com-a[1].com);
   const comTotal=comList.reduce((s,e)=>s+e[1].com,0);
+  const comMesHTML=await comisionesPorMesHTML(COM_LOCAL,COM_DROP);
   const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
   const ingresos=sum(ventas,'total'), ganancia=sum(ventas,'ganancia'), descuentos=sum(ventas,'descuento_monto');
   const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
@@ -654,6 +656,10 @@ async function renderReportes(){
       </tbody></table>`}
     </div>
     <div class="card">
+      <b>📅 Comisiones por mes</b> <span class="muted" style="font-size:12px">— histórico completo (no depende del rango de arriba)</span>
+      <div style="margin-top:.6rem">${comMesHTML}</div>
+    </div>
+    <div class="card">
       <b>🔥 Lo más vendido</b> <span class="muted" style="font-size:12px">— para saber qué reabastecer</span>
       <div style="margin-top:.6rem">
       ${topSku.length===0?'<div class="empty">Aún no hay ventas en este rango</div>':topSku.map(([sku,o])=>`
@@ -678,6 +684,62 @@ async function renderReportes(){
     </div>
   `;
 }
+// Comisiones agrupadas por mes calendario, TODO el histórico (no depende del filtro de fecha de arriba).
+// Sirve para saber cuánto pagarle a cada vendedor mes a mes.
+async function comisionesPorMesHTML(COM_LOCAL,COM_DROP){
+  const { data:all } = await db.from('ventas').select('*').eq('anulada',false);
+  const noAdmin=(all||[]).filter(v=>!ADMIN_NAMES.includes(v.vendedor));
+  const ids=noAdmin.map(v=>v.id);
+  let items=[];
+  if(ids.length){ const {data:it}=await db.from('venta_items').select('venta_id,cantidad').in('venta_id',ids); items=it||[]; }
+  const unitsByVenta={}; items.forEach(i=>{ unitsByVenta[i.venta_id]=(unitsByVenta[i.venta_id]||0)+i.cantidad; });
+  const porMes={};
+  noAdmin.forEach(v=>{
+    const mes=v.fecha.slice(0,7);
+    const units=unitsByVenta[v.id]||0;
+    const tarifa=v.tipo==='dropshipping'?COM_DROP:COM_LOCAL;
+    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifa;
+    porMes[mes]=porMes[mes]||{};
+    porMes[mes][v.vendedor]=(porMes[mes][v.vendedor]||0)+com;
+  });
+  const meses=Object.keys(porMes).sort().reverse();
+  if(meses.length===0) return '<div class="empty">Aún no hay comisiones registradas</div>';
+  const nombreMes = m => { const [y,mm]=m.split('-'); return new Date(+y,+mm-1,1).toLocaleDateString('es-EC',{month:'long',year:'numeric'}); };
+  return meses.map(m=>{
+    const vend=Object.entries(porMes[m]).sort((a,b)=>b[1]-a[1]);
+    const totalMes=vend.reduce((s,e)=>s+e[1],0);
+    return `<div style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;font-weight:600;text-transform:capitalize;margin-bottom:.3rem">
+        <span>${nombreMes(m)}</span><span style="color:var(--gold)">${money(totalMes)}</span>
+      </div>
+      <table><tbody>
+      ${vend.map(([k,val])=>`<tr><td>${k}</td><td style="text-align:right;color:var(--gold)">${money(val)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>`;
+  }).join('');
+}
+
+// ── Admin: eliminar venta (repone stock automático si era local) ──
+async function eliminarVenta(id){
+  if(!confirm('¿Eliminar esta venta? No se puede deshacer.\nSi era venta LOCAL, el stock de esas prendas se repone automáticamente.')) return;
+  const { error } = await db.from('ventas').delete().eq('id', id);
+  if(error){ toast('Error: '+error.message); return; }
+  toast('✓ Venta eliminada');
+  closeModal();
+  renderReportes();
+}
+
+// ── Admin: ajustar manualmente la comisión de una venta puntual ──
+async function guardarComision(id){
+  const val = parseFloat(document.getElementById('com-edit').value);
+  if(isNaN(val) || val<0){ toast('Monto inválido'); return; }
+  const { error } = await db.from('ventas').update({ comision_ajustada: val }).eq('id', id);
+  if(error){ toast('Error: '+error.message); return; }
+  toast('✓ Comisión ajustada a '+money(val));
+  closeModal();
+  renderReportes();
+}
+
 function verVenta(id){
   const v=(window._ventasCache||[]).find(x=>x.id===id); if(!v) return;
   const its=(window._itemsByVenta||{})[id]||[];
@@ -698,8 +760,21 @@ function verVenta(id){
     ${v.tipo==='dropshipping'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
     <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}
-    ${(()=>{ if(ADMIN_NAMES.includes(v.vendedor)) return ''; const u=its.reduce((s,i)=>s+i.cantidad,0); const com=u*(v.tipo==='dropshipping'?parseFloat(CONFIG.comision_dropship||'2'):parseFloat(CONFIG.comision_local||'1')); return com>0?`<div class="totline"><span class="muted">Comisión ${v.vendedor}</span><span style="color:var(--gold)">${money(com)}</span></div>`:''; })()}
-    <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>`;
+    ${(()=>{
+      if(ADMIN_NAMES.includes(v.vendedor)) return '';
+      const u=its.reduce((s,i)=>s+i.cantidad,0);
+      const tarifa=v.tipo==='dropshipping'?parseFloat(CONFIG.comision_dropship||'2'):parseFloat(CONFIG.comision_local||'1');
+      const comCalc=u*tarifa;
+      const comActual=v.comision_ajustada!=null?+v.comision_ajustada:comCalc;
+      if(!ES_ADMIN) return comActual>0?`<div class="totline"><span class="muted">Comisión ${v.vendedor}</span><span style="color:var(--gold)">${money(comActual)}</span></div>`:'';
+      return `<div class="totline"><span class="muted">Comisión ${v.vendedor}${v.comision_ajustada!=null?' (ajustada)':' (calculada: '+money(comCalc)+')'}</span><span style="color:var(--gold);font-weight:600">${money(comActual)}</span></div>
+        <div class="row" style="margin-top:.4rem">
+          <input class="fld" id="com-edit" type="number" step="0.5" value="${comActual.toFixed(2)}" style="flex:1">
+          <button class="btn btn-gold" onclick="guardarComision('${id}')">Guardar</button>
+        </div>`;
+    })()}
+    <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>
+    ${ES_ADMIN?`<button class="btn btn-red" style="width:100%;margin-top:1rem;padding:.7rem" onclick="eliminarVenta('${id}')">🗑 Eliminar venta</button>`:''}`;
   showModal(html);
 }
 function showModal(html){ document.getElementById('modal-box').innerHTML=html; document.getElementById('modal').classList.add('open'); }

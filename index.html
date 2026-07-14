@@ -253,7 +253,10 @@ async function renderVender(){
         <input class="fld" id="c-nombre" placeholder="Nombre">
         <input class="fld" id="c-tel" placeholder="Teléfono 09…">
       </div>
-      <input class="fld" id="c-ciudad" placeholder="Ciudad" style="margin-bottom:.7rem">
+      <div class="grid2" style="margin-bottom:.6rem">
+        <input class="fld" id="c-cedula" placeholder="Cédula">
+        <input class="fld" id="c-ciudad" placeholder="Ciudad">
+      </div>
       <div id="drop-fields" style="display:none">
         <label class="lbl">Dirección exacta de envío</label>
         <input class="fld" id="c-direccion" placeholder="Calle, número, referencia…" style="margin-bottom:.7rem">
@@ -421,6 +424,7 @@ async function registrarVenta(){
   const ciudad = document.getElementById('c-ciudad').value||null;
   const direccion = TIPO==='dropshipping' ? (document.getElementById('c-direccion').value||null) : null;
   const telefono = document.getElementById('c-tel').value||null;
+  const cedula = document.getElementById('c-cedula').value||null;
   // Dropshipping necesita destino para que la proveedora envíe + teléfono para el CRM (aviso de guía)
   if(TIPO==='dropshipping' && (!ciudad || !direccion || !telefono)){
     toast('Dropshipping necesita teléfono, ciudad y dirección'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
@@ -428,7 +432,7 @@ async function registrarVenta(){
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
     cliente_nombre: document.getElementById('c-nombre').value||null,
-    cliente_telefono: telefono,
+    cliente_telefono: telefono, cedula,
     ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
@@ -468,6 +472,7 @@ async function sincronizarCRM(venta, items, folio){
   const itemsPedido = items.map(i=>({ nombre:(i.cantidad>1?i.cantidad+'x ':'')+corto(i.nombre), color:i.color||'', talla:i.talla||'', precio:i.precio_unit }));
   const notas = [
     `Venta #${folio} · ${venta.tipo==='local'?'🏬 Local':'📦 Dropshipping'} · Vendedor: ${venta.vendedor}`,
+    venta.cedula ? `CI: ${venta.cedula}` : null,
     venta.direccion ? `Dirección: ${venta.direccion}` : null,
     venta.descuento_monto>0 ? `Descuento aplicado: -${money(venta.descuento_monto)}` : null
   ].filter(Boolean).join(' — ');
@@ -490,10 +495,10 @@ function waLink(venta, items, folio){
     const lineas = items.map(prenda).join('\n');
     const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
     const env = +venta.costo_envio||0;
-    msg = `📦 PEDIDO DROPSHIPPING #${folio}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(costoP+env)}*\n   Prendas ${money(costoP)} + Envío ${money(env)}\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}`;
+    msg = `📦 PEDIDO DROPSHIPPING #${folio}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(costoP+env)}*\n   Prendas ${money(costoP)} + Envío ${money(env)}\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
   } else {
     const lineas = items.map(i=>`${prenda(i)} (${money(i.precio_unit)})`).join('\n');
-    const cli = [venta.cliente_nombre, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
+    const cli = [venta.cliente_nombre, venta.cedula, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
     const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
     const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
     msg = `🧾 NUEVA VENTA #${folio}\n🏬 LOCAL${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
@@ -635,6 +640,13 @@ async function renderReportes(){
   });
   const dias=Object.entries(porDia).sort((a,b)=>b[0].localeCompare(a[0]));
   const maxIng=Math.max(1,...dias.map(d=>d[1].ing));
+  // devoluciones del rango (tabla nueva; si no existe aún, devs=[])
+  const { data:devsData } = await db.from('devoluciones').select('*')
+    .gte('fecha',REP_DESDE.toISOString()).lte('fecha',REP_HASTA.toISOString()).order('fecha',{ascending:false});
+  const devs=devsData||[];
+  const devMonto=devs.reduce((s,d)=>s+(+d.monto||0),0);
+  const devUnid=devs.reduce((s,d)=>s+((Array.isArray(d.items)?d.items:[]).reduce((a,i)=>a+(+i.cantidad||0),0)),0);
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
 
   v.innerHTML = `
     <h2 class="page">Reportes</h2>
@@ -660,6 +672,18 @@ async function renderReportes(){
       <div class="totline" style="margin-top:.5rem"><span><span class="badge b-local">LOCAL</span> ${local.length} ventas</span><span class="gain">${money(sum(local,'ganancia'))}</span></div>
       <div class="totline"><span><span class="badge b-drop">DROPSHIP</span> ${drop.length} ventas</span><span class="gain">${money(sum(drop,'ganancia'))}</span></div>
     </div>
+    ${devs.length ? `
+    <div class="card" style="border-left:3px solid var(--red)">
+      <b>↩️ Devoluciones</b> <span class="muted" style="font-size:12px">— ${devs.length} devolución(es) · ${devUnid} prenda(s)</span>
+      <div class="totline" style="margin-top:.5rem"><span class="muted">Total devuelto al cliente</span><span style="color:var(--red)">-${money(devMonto)}</span></div>
+      <div class="totline big"><span>Ingresos netos</span><span>${money(ingresos-devMonto)}</span></div>
+      <div style="margin-top:.6rem;border-top:1px solid var(--border);padding-top:.4rem">
+      ${devs.map(d=>`<div style="font-size:12px;padding:.3rem 0;border-bottom:1px solid var(--border)">
+        <b>Venta #${d.venta_folio}</b> · ${new Date(d.fecha).toLocaleDateString('es-EC',{day:'numeric',month:'short'})} · ${d.vendedor||''} <span style="color:var(--red)">-${money(d.monto)}</span>
+        <div class="muted">${(Array.isArray(d.items)?d.items:[]).map(i=>`${i.cantidad}x ${corto(i.nombre)} ${i.talla||''}`).join(', ')}${d.motivo?' · '+d.motivo:''}${d.repuso_stock?' · ↩ stock repuesto':''}</div>
+      </div>`).join('')}
+      </div>
+    </div>` : ''}
     <div class="card">
       <b>Ventas día a día</b>
       <div style="margin-top:.6rem">
@@ -773,7 +797,7 @@ async function guardarComision(id){
 function verVenta(id){
   const v=(window._ventasCache||[]).find(x=>x.id===id); if(!v) return;
   const its=(window._itemsByVenta||{})[id]||[];
-  const cli=[v.cliente_nombre,v.cliente_telefono,v.ciudad].filter(Boolean).join(' · ');
+  const cli=[v.cliente_nombre,v.cedula&&('CI '+v.cedula),v.cliente_telefono,v.ciudad].filter(Boolean).join(' · ');
   const fecha=new Date(v.fecha).toLocaleString('es-EC',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   const html=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
@@ -804,11 +828,79 @@ function verVenta(id){
         </div>`;
     })()}
     <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>
-    ${ES_ADMIN?`<button class="btn btn-red" style="width:100%;margin-top:1rem;padding:.7rem" onclick="eliminarVenta('${id}')">🗑 Eliminar venta</button>`:''}`;
+    ${ES_ADMIN?`<button class="btn btn-ghost" style="width:100%;margin-top:1rem;padding:.7rem" onclick="abrirDevolucion('${id}')">↩️ Registrar devolución</button>`:''}
+    ${ES_ADMIN?`<button class="btn btn-red" style="width:100%;margin-top:.6rem;padding:.7rem" onclick="eliminarVenta('${id}')">🗑 Eliminar venta</button>`:''}`;
   showModal(html);
 }
 function showModal(html){ document.getElementById('modal-box').innerHTML=html; document.getElementById('modal').classList.add('open'); }
 function closeModal(){ document.getElementById('modal').classList.remove('open'); }
+
+// ════════════ DEVOLUCIONES (admin) ════════════
+// Formulario: elegir qué prendas y cuántas devolver de una venta.
+function abrirDevolucion(ventaId){
+  const v=(window._ventasCache||[]).find(x=>x.id===ventaId); if(!v) return;
+  const its=(window._itemsByVenta||{})[ventaId]||[];
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const filas=its.map((i,idx)=>`
+    <div class="totline" style="align-items:center">
+      <span style="flex:1">${corto(i.nombre)} ${i.talla||''} <span class="muted">(${i.cantidad} vend · ${money(i.precio_unit)})</span></span>
+      <div class="qtybox">
+        <button onclick="devQ(${idx},-1,${i.cantidad})">−</button>
+        <span id="devq-${idx}" data-q="0" data-precio="${i.precio_unit}" data-sku="${i.sku}" data-max="${i.cantidad}" style="min-width:22px;text-align:center">0</span>
+        <button onclick="devQ(${idx},1,${i.cantidad})">+</button>
+      </div>
+    </div>`).join('');
+  const html=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+      <h3 style="font-size:17px">↩️ Devolución — Venta #${v.folio}</h3>
+      <button onclick="verVenta('${ventaId}')" class="btn btn-ghost" style="padding:.3rem .7rem">✕</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin-bottom:.7rem">Elige cuántas prendas devuelve el cliente. ${v.tipo==='local'?'Se repone el stock de tienda automáticamente.':'(Dropshipping: no afecta el stock de tienda.)'}</p>
+    <div style="border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:.4rem 0;margin-bottom:.7rem">${filas}</div>
+    <label class="lbl">Monto a devolver al cliente</label>
+    <input class="fld" id="dev-monto" type="number" step="0.5" value="0.00" style="margin-bottom:.7rem">
+    <label class="lbl">Motivo</label>
+    <input class="fld" id="dev-motivo" placeholder="Ej: talla equivocada, defecto…" style="margin-bottom:.9rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="guardarDevolucion('${ventaId}')">Confirmar devolución</button>`;
+  showModal(html);
+}
+function devQ(idx,d,max){
+  const el=document.getElementById('devq-'+idx);
+  let q=(+el.dataset.q)+d; if(q<0)q=0; if(q>max)q=max;
+  el.dataset.q=q; el.textContent=q;
+  // recalcular monto sugerido = suma prendas devueltas a precio unitario
+  let m=0; document.querySelectorAll('[id^="devq-"]').forEach(s=>{ m+=(+s.dataset.q)*(+s.dataset.precio); });
+  document.getElementById('dev-monto').value=m.toFixed(2);
+}
+async function guardarDevolucion(ventaId){
+  const v=(window._ventasCache||[]).find(x=>x.id===ventaId); if(!v) return;
+  const items=[];
+  document.querySelectorAll('[id^="devq-"]').forEach(s=>{
+    const q=+s.dataset.q; if(q>0) items.push({ sku:s.dataset.sku, cantidad:q, precio_unit:+s.dataset.precio });
+  });
+  if(items.length===0){ toast('Elige al menos 1 prenda a devolver'); return; }
+  const monto=parseFloat(document.getElementById('dev-monto').value)||0;
+  const motivo=document.getElementById('dev-motivo').value||null;
+  // nombres para el registro
+  const its=(window._itemsByVenta||{})[ventaId]||[];
+  items.forEach(it=>{ const src=its.find(x=>x.sku===it.sku); if(src){ it.nombre=src.nombre; it.talla=src.talla; it.costo_unit=src.costo_unit; }});
+  const repuso = v.tipo==='local';
+  const { error } = await db.from('devoluciones').insert({
+    venta_id:ventaId, venta_folio:v.folio, vendedor:v.vendedor, cliente_nombre:v.cliente_nombre,
+    tipo:v.tipo, items, monto, repuso_stock:repuso, motivo
+  });
+  if(error){ toast('Error: '+error.message); return; }
+  // reponer stock si fue venta local (el producto vuelve a la tienda)
+  if(repuso){
+    for(const it of items){
+      const { data:p } = await db.from('productos').select('stock').eq('sku',it.sku).single();
+      if(p) await db.from('productos').update({ stock:(p.stock||0)+it.cantidad }).eq('sku',it.sku);
+    }
+  }
+  toast('✓ Devolución registrada'+(repuso?' · stock repuesto':''));
+  closeModal();
+  renderReportes();
+}
 
 // ── init ──
 initLogin();

@@ -372,7 +372,7 @@ function setDesc(t){
   document.getElementById('d-fin').classList.toggle('on',t==='monto_final');
   const inp=document.getElementById('desc-val');
   inp.style.display = t==='no'?'none':'block';
-  inp.placeholder = t==='porcentaje'?'% de descuento (ej: 10)':'Precio final de los productos ($)';
+  inp.placeholder = t==='porcentaje'?'% de descuento (ej: 10)':'Total que paga el cliente, con envío ($)';
   if(t==='no') inp.value='';
   calcTotales();
 }
@@ -392,26 +392,30 @@ function setEnvio(m){
 function calcTotales(){
   const subtotal = cart.reduce((s,c)=>s+c.precio_unit*c.cantidad,0);
   const costo = cart.reduce((s,c)=>s+c.costo_unit*c.cantidad,0);
-  // Descuento: por porcentaje o por precio final de los productos
-  let descuentoMonto=0, descTipo=null, descVal=0;
-  const dv = parseFloat((document.getElementById('desc-val')||{}).value)||0;
-  if(DESC_TIPO==='porcentaje' && dv>0){ descTipo='porcentaje'; descVal=Math.min(dv,100); descuentoMonto = subtotal*descVal/100; }
-  else if(DESC_TIPO==='monto_final' && dv>0){ descTipo='monto_final'; descVal=dv; descuentoMonto = Math.max(0, subtotal-dv); }
-  const subtotalNeto = subtotal - descuentoMonto;
   let costoEnvio=0, envioCobrado=0;
   if(TIPO==='dropshipping'){
     const zona=document.getElementById('zona').value;
     costoEnvio=ENVIO[zona];
     envioCobrado = ENVIO_MODO==='cliente'? costoEnvio : 0;
   }
-  const total = subtotalNeto + envioCobrado;
-  const ganancia = subtotalNeto - costo + envioCobrado - costoEnvio;
+  // Descuento: por porcentaje de los productos, o "precio final" = TOTAL que paga el
+  // cliente (envío incluido). El precio final siempre se respeta tal cual lo escribe
+  // el vendedor; si queda por encima del precio de lista, descuentoMonto sale negativo
+  // (un recargo) y la ganancia sube en consecuencia.
+  let descuentoMonto=0, descTipo=null, descVal=0;
+  const dv = parseFloat((document.getElementById('desc-val')||{}).value)||0;
+  if(DESC_TIPO==='porcentaje' && dv>0){ descTipo='porcentaje'; descVal=Math.min(dv,100); descuentoMonto = subtotal*descVal/100; }
+  else if(DESC_TIPO==='monto_final' && dv>0){ descTipo='monto_final'; descVal=dv; descuentoMonto = (subtotal+envioCobrado) - dv; }
+  descuentoMonto = Math.round(descuentoMonto*100)/100;
+  const total = subtotal + envioCobrado - descuentoMonto;
+  const ganancia = total - costo - costoEnvio;
   const el=document.getElementById('totales');
   if(el) el.innerHTML = `
     <div class="totline"><span class="muted">Productos</span><span>${money(subtotal)}</span></div>
-    ${descuentoMonto>0?`<div class="totline"><span class="muted">Descuento ${descTipo==='porcentaje'?'('+descVal+'%)':''}</span><span style="color:var(--red)">-${money(descuentoMonto)}</span></div>`:''}
     ${TIPO==='dropshipping'?`<div class="totline"><span class="muted">Envío cobrado al cliente</span><span>${money(envioCobrado)}</span></div>
       <div class="totline"><span class="muted">Costo de envío (lo pagas tú)</span><span>-${money(costoEnvio)}</span></div>`:''}
+    ${descuentoMonto>0?`<div class="totline"><span class="muted">Descuento ${descTipo==='porcentaje'?'('+descVal+'%)':''}</span><span style="color:var(--red)">-${money(descuentoMonto)}</span></div>`:''}
+    ${descuentoMonto<0?`<div class="totline"><span class="muted">Ajuste por precio final</span><span>+${money(-descuentoMonto)}</span></div>`:''}
     <div class="totline big"><span>Total a cobrar</span><span>${money(total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Tu ganancia</span><span class="gain">${money(ganancia)}</span></div>`:''}`;
   return {subtotal,costo,descuentoMonto,descTipo,descVal,costoEnvio,envioCobrado,total,ganancia};
@@ -474,7 +478,8 @@ async function sincronizarCRM(venta, items, folio){
     `Venta #${folio} · ${venta.tipo==='local'?'🏬 Local':'📦 Dropshipping'} · Vendedor: ${venta.vendedor}`,
     venta.cedula ? `CI: ${venta.cedula}` : null,
     venta.direccion ? `Dirección: ${venta.direccion}` : null,
-    venta.descuento_monto>0 ? `Descuento aplicado: -${money(venta.descuento_monto)}` : null
+    venta.descuento_monto>0 ? `Descuento aplicado: -${money(venta.descuento_monto)}` : null,
+    venta.descuento_monto<0 ? `Ajuste por precio final: +${money(-venta.descuento_monto)}` : null
   ].filter(Boolean).join(' — ');
   try{
     await db.from('pedidos').insert({
@@ -500,7 +505,8 @@ function waLink(venta, items, folio){
     const lineas = items.map(i=>`${prenda(i)} (${money(i.precio_unit)})`).join('\n');
     const cli = [venta.cliente_nombre, venta.cedula, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
     const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
-    const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}` : '';
+    const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}`
+               : (venta.descuento_monto<0) ? `\n🏷️ Ajuste por precio final: +${money(-venta.descuento_monto)}` : '';
     msg = `🧾 NUEVA VENTA #${folio}\n🏬 LOCAL${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
   }
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
@@ -811,6 +817,7 @@ function verVenta(id){
     ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
     </div>
     ${v.descuento_monto>0?`<div class="totline" style="color:var(--red)"><span>Descuento</span><span>-${money(v.descuento_monto)}</span></div>`:''}
+    ${v.descuento_monto<0?`<div class="totline"><span>Ajuste por precio final</span><span>+${money(-v.descuento_monto)}</span></div>`:''}
     ${v.tipo==='dropshipping'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
     <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}

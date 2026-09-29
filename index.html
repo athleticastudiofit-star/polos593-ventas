@@ -337,6 +337,12 @@ let SEL={genero:null,prenda:null,color:null};
 const PRENDA_LABEL={camisa_mujer:'Camisa Manga Larga',camisa_hombre:'Camisa Manga Larga',polo_pique:'Polo Piqué RL',polo_lacoste:'Polo Piqué Lacoste',camiseta_rl:'Camiseta Redonda Polo RL',camiseta_lacoste:'Camiseta Redonda Lacoste',camisa_corta_hombre:'Camisa Manga Corta',camisa_lacoste:'Camisa Manga Larga Lacoste'};
 const PRENDA_ICON={camisa_mujer:'👔',camisa_hombre:'👔',polo_pique:'🎽',polo_lacoste:'🎽',camiseta_rl:'👕',camiseta_lacoste:'👕',camisa_corta_hombre:'👔',camisa_lacoste:'👔'};
 const COLOR_HEX={'Blanco':'#f5f5f5','Negro':'#1a1a1a','Celeste Claro':'#a8d8ea','Celeste claro':'#a8d8ea','Navy':'#1b2a4a','Azul Marino':'#1b2a4a','Rosa Pastel':'#f4c2c2','Rosa pastel':'#f4c2c2','Amarillo':'#f4d03f','Gris Jaspe':'#9e9e9e','Verde Oliva':'#6b7a3a','Rojo Intenso':'#a93226','Café':'#6f4e37','Turquesa':'#40e0d0','Rojo':'#c0392b','Azul Rey':'#1e3a8a','Naranja':'#e67e22','Celeste Cielo':'#87ceeb','Verde Bosque':'#1e7a3a','Verde Agua':'#2dd4bf','Celeste 2':'#b0e0e6','Verde Lima':'#a3e635','Gris Oscuro':'#555555','Verde Menta':'#98e8b0','Celeste Pastel':'#cce7f0'};
+// Prendas de liquidación (29 sep 2026): costo 0 (ya pagadas) y precio 0 → se venden con "$ Precio final"
+Object.assign(PRENDA_LABEL,{liq_camisa_tommy:'Camisa Tommy · Liq.',liq_polo_mujer:'Polo Mujer · Liq.',liq_camisa_corta:'Camisa M. Corta · Liq.',liq_camiseta_tommy:'Camiseta Tommy · Liq.',liq_camiseta_prada:'Camiseta Prada · Liq.',liq_pantaloneta_polo:'Pantaloneta Polo · Liq.'});
+Object.assign(COLOR_HEX,{'Beige':'#d8c3a5','Amarillo/Negro':'linear-gradient(135deg,#f4d03f 50%,#1a1a1a 50%)','Blanco rayas rojas':'repeating-linear-gradient(90deg,#f5f5f5 0 5px,#c0392b 5px 8px)'});
+// Etiqueta/ícono de un tipo: si no está en los mapas, usa el nombre del producto (así un tipo nuevo no sale en crudo)
+const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)||{}).nombre) || t;
+const prendaIcon  = t => PRENDA_ICON[t] || (String(t).startsWith('liq_') ? '🏷️' : '👕');
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
 
 const prodsGenero = g => productosCache.filter(p => p.genero===g || p.genero==='unisex');
@@ -348,7 +354,7 @@ function wizardBack(){ if(SEL.color) SEL.color=null; else if(SEL.prenda) SEL.pre
 
 function renderWizard(){
   const el=document.getElementById('wizard'); if(!el) return;
-  const crumb = `<div class="wz-crumb">${SEL.genero?`<span>${SEL.genero==='mujer'?'👩 Mujer':'👨 Hombre'}</span>`:''}${SEL.prenda?`<span>${PRENDA_LABEL[SEL.prenda]}</span>`:''}${SEL.color?`<span>${SEL.color}</span>`:''}${(SEL.genero?`<button class="wz-back" onclick="wizardBack()">‹ Volver</button>`:'')}</div>`;
+  const crumb = `<div class="wz-crumb">${SEL.genero?`<span>${SEL.genero==='mujer'?'👩 Mujer':'👨 Hombre'}</span>`:''}${SEL.prenda?`<span>${prendaLabel(SEL.prenda)}</span>`:''}${SEL.color?`<span>${SEL.color}</span>`:''}${(SEL.genero?`<button class="wz-back" onclick="wizardBack()">‹ Volver</button>`:'')}</div>`;
   let body='';
   if(!SEL.genero){
     body=`<div class="wz-step">¿Para quién es?</div>
@@ -358,7 +364,7 @@ function renderWizard(){
       </div>`;
   } else if(!SEL.prenda){
     const tipos=[...new Set(prodsGenero(SEL.genero).map(p=>p.tipo))];
-    body=`<div class="wz-step">¿Qué prenda?</div><div class="wz-grid">${tipos.map(t=>`<button class="wz-btn" onclick="pickPrenda('${t}')"><span style="font-size:26px">${PRENDA_ICON[t]||'👕'}</span>${PRENDA_LABEL[t]||t}</button>`).join('')}</div>`;
+    body=`<div class="wz-step">¿Qué prenda?</div><div class="wz-grid">${tipos.map(t=>`<button class="wz-btn" onclick="pickPrenda('${t}')"><span style="font-size:26px">${prendaIcon(t)}</span>${prendaLabel(t)}</button>`).join('')}</div>`;
   } else if(!SEL.color){
     const subset=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda);
     const byColor={}; subset.forEach(p=>{ byColor[p.color]=(byColor[p.color]||0)+p.stock; });
@@ -366,7 +372,7 @@ function renderWizard(){
     body=`<div class="wz-step">¿Qué color?</div><div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${colores.map(c=>`<button class="wz-btn" onclick="pickColor('${c.replace(/'/g,"\\'")}')"><span class="wz-swatch" style="background:${COLOR_HEX[c]||'#888'}"></span><span style="font-size:11px">${c}</span><span class="sub" style="color:${byColor[c]>0?'var(--green)':'var(--soft)'}">${byColor[c]>0?'tienda '+byColor[c]:'catálogo'}</span></button>`).join('')}</div>`;
   } else {
     const opts=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda && p.color===SEL.color).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
-    const precio=opts[0]?money(opts[0].precio_venta):'';
+    const precio=opts[0]?(+opts[0].precio_venta>0?money(opts[0].precio_venta):'🏷️ liquidación: el precio se pone en "$ Precio final"'):'';
     body=`<div class="wz-step">¿Qué talla? <span class="muted" style="font-size:13px;font-weight:400">· ${precio}</span></div>
       <div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">${opts.map(p=>`<button class="wz-btn" style="min-height:64px" onclick="pickTalla('${p.sku}')"><span style="font-size:22px;font-weight:700">${p.talla}</span><span class="sub">stock ${p.stock}</span></button>`).join('')}</div>`;
   }
@@ -479,7 +485,13 @@ function calcTotales(){
 }
 async function registrarVenta(){
   if(!cart.length) return;
-  const btn=document.getElementById('btn-vender'); btn.disabled=true; btn.textContent='Guardando…';
+  const btn=document.getElementById('btn-vender');
+  // Prendas de liquidación vienen con precio 0: sin "precio final" se venderían regaladas
+  const precioFinal = parseFloat((document.getElementById('desc-val')||{}).value)||0;
+  if(cart.some(c=>!(+c.precio_unit>0)) && !(DESC_TIPO==='monto_final' && precioFinal>0)){
+    toast('Hay prendas de liquidación sin precio: escribe el total en "$ Precio final"'); return;
+  }
+  btn.disabled=true; btn.textContent='Guardando…';
   const t=calcTotales();
   const esCOD = TIPO==='contraentrega';
   const conEnvio = TIPO==='dropshipping' || esCOD;
@@ -846,7 +858,8 @@ async function renderReportes(){
   const comTotal=comList.reduce((s,e)=>s+e[1].com,0);
   const comMesHTML=await comisionesPorMesHTML(COM_LOCAL,COM_DROP);
   const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
-  const ingresos=sum(ventasCob,'total'), ganancia=sum(ventasCob,'ganancia'), descuentos=sum(ventasCob,'descuento_monto');
+  // descuentos: solo los positivos (un "precio final" sobre la lista, p.ej. liquidación, es ajuste, no descuento)
+  const ingresos=sum(ventasCob,'total'), ganancia=sum(ventasCob,'ganancia'), descuentos=ventasCob.reduce((s,x)=>s+Math.max(0,+x.descuento_monto||0),0);
   const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
   const codCob=ventasCob.filter(x=>x.tipo==='contraentrega');
   const porDia={}, porVend={};

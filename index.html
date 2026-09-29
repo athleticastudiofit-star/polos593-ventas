@@ -54,6 +54,14 @@ label.lbl{font-size:12px;color:var(--soft);display:block;margin-bottom:.25rem}
 .badge{display:inline-block;padding:.15rem .5rem;border-radius:20px;font-size:11px;font-weight:600}
 .b-local{background:rgba(59,130,246,.15);color:var(--blue)}
 .b-drop{background:rgba(236,72,153,.15);color:var(--pink)}
+.b-cod{background:rgba(234,179,8,.15);color:var(--yellow)}
+.nav-count{background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:0 .35rem;margin-left:.2rem}
+.env-card{border-left:3px solid var(--border)}
+.env-card.st-por_despachar{border-left-color:var(--yellow)}
+.env-card.st-en_camino{border-left-color:var(--blue)}
+.env-card.st-entregado{border-left-color:var(--green)}
+.env-card.st-depositado{border-left-color:var(--gold)}
+.env-card.st-rechazado{border-left-color:var(--red);opacity:.7}
 .b-low{background:rgba(239,68,68,.18);color:var(--red)}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:.7rem 1.2rem;border-radius:10px;font-weight:600;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;text-align:center}
 .toast.show{opacity:1}
@@ -131,6 +139,10 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>
       Vender
     </button>
+    <button data-tab="envios" onclick="go('envios')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      <span>Envíos<span class="nav-count" id="nav-envios" style="display:none"></span></span>
+    </button>
     <button data-tab="inventario" onclick="go('inventario')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>
       Inventario
@@ -151,6 +163,23 @@ const SUPABASE_KEY = 'sb_publishable_EzKXkvdHpyPs_m_76J9kZg_l3BJIoor';
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const ENVIO = { guayaquil: 3.50, provincia: 6.50 };
+// Contra entrega (Pardux): sale de Guayaquil, al cliente se le cobra $5 o $6 de envío y el
+// costo real de Pardux (no es tarifa fija) se registra después, al cargar la guía en Envíos.
+const COD_ENVIOS = [5, 6];
+const EST_ENVIO = {
+  por_despachar:{txt:'📝 Por despachar', badge:'b-cod'},
+  en_camino:    {txt:'🚚 En camino',     badge:'b-local'},
+  entregado:    {txt:'✅ Entregado y cobrado', badge:'b-local'},
+  depositado:   {txt:'💰 Depositado',    badge:'b-local'},
+  rechazado:    {txt:'↩️ Rechazado',     badge:'b-drop'}
+};
+const COD_COBRADO = v => v.tipo==='contraentrega' && (v.estado_envio==='entregado' || v.estado_envio==='depositado');
+// Tarifa de comisión por prenda. Contra entrega solo paga cuando ya se entregó y cobró.
+function tarifaCom(v){
+  if(v.tipo==='contraentrega') return COD_COBRADO(v) ? parseFloat(CONFIG.comision_contraentrega||CONFIG.comision_dropship||'2') : 0;
+  return v.tipo==='dropshipping' ? parseFloat(CONFIG.comision_dropship||'2') : parseFloat(CONFIG.comision_local||'1');
+}
+const TIPO_BADGE = t => t==='local' ? ['b-local','LOCAL','LOC'] : t==='contraentrega' ? ['b-cod','CONTRA ENTREGA','COD'] : ['b-drop','DROPSHIP','DROP'];
 const BAILEYS_URL = 'https://whatsapp-baileys-production-3e0b.up.railway.app';
 const ADMIN_NAMES = ['Homero'];          // quién ve Reportes e Inventario
 let VENDEDOR = localStorage.getItem('p593_vendedor') || '';
@@ -208,6 +237,7 @@ async function enterApp(){
     b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes')) ? 'none' : '';
   });
   go('vender');
+  actualizarBadgeEnvios();
 }
 function logout(){ localStorage.removeItem('p593_auth'); location.reload(); }
 
@@ -218,6 +248,7 @@ function go(tab){
   TAB=tab;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   if(tab==='vender') renderVender();
+  if(tab==='envios') renderEnvios();
   if(tab==='inventario') renderInventario();
   if(tab==='reportes') renderReportes();
 }
@@ -247,6 +278,7 @@ async function renderVender(){
       <div class="seg" style="margin-bottom:.8rem">
         <button id="t-local" class="on" onclick="setTipo('local')">🏬 Local</button>
         <button id="t-drop" onclick="setTipo('dropshipping')">📦 Dropshipping</button>
+        <button id="t-cod" onclick="setTipo('contraentrega')">🚚 Contra entrega</button>
       </div>
       <label class="lbl">Datos del cliente <span style="color:var(--soft)">(recomendado)</span></label>
       <div class="grid2" style="margin-bottom:.6rem">
@@ -260,6 +292,7 @@ async function renderVender(){
       <div id="drop-fields" style="display:none">
         <label class="lbl">Dirección exacta de envío</label>
         <input class="fld" id="c-direccion" placeholder="Calle, número, referencia…" style="margin-bottom:.7rem">
+        <div id="servientrega-fields">
         <div style="margin-bottom:.7rem"><label class="lbl">Zona de envío</label>
           <select class="fld" id="zona" onchange="calcTotales()">
             <option value="guayaquil">Guayaquil ($3.50)</option>
@@ -271,6 +304,14 @@ async function renderVender(){
           <button id="e-cli" class="on" onclick="setEnvio('cliente')">Cliente paga</button>
           <button id="e-free" onclick="setEnvio('gratis')">Gratis (promo)</button>
         </div>
+        </div>
+        <div id="cod-fields" style="display:none">
+          <div class="muted" style="font-size:12px;margin-bottom:.6rem">🚚 Envío por <b>Pardux</b> desde Guayaquil. El cliente paga todo al recibir. La comisión cuenta cuando quede <b>entregado y cobrado</b>.</div>
+          <label class="lbl">Envío que paga el cliente</label>
+          <div class="seg" style="margin-bottom:.4rem">
+            ${COD_ENVIOS.map((n,i)=>`<button id="cod-e-${n}" class="${i===0?'on':''}" onclick="setCodEnvio(${n})">$${n}</button>`).join('')}
+          </div>
+        </div>
       </div>
       <label class="lbl">Descuento (opcional)</label>
       <div class="seg" style="margin-bottom:.5rem">
@@ -279,7 +320,7 @@ async function renderVender(){
         <button id="d-fin" onclick="setDesc('monto_final')">$ Precio final</button>
       </div>
       <input class="fld" id="desc-val" type="number" step="0.5" style="display:none;margin-bottom:.6rem" oninput="calcTotales()">
-      <div style="margin:.6rem 0"><label class="lbl">Método de pago</label>
+      <div style="margin:.6rem 0" id="pago-wrap"><label class="lbl">Método de pago</label>
         <select class="fld" id="pago"><option>Efectivo</option><option>Transferencia</option><option>Otro</option></select>
       </div>
       <div id="totales"></div>
@@ -364,7 +405,12 @@ function renderCart(){
       </div>`).join('');
   if(cart.length) calcTotales();
 }
-let TIPO='local', ENVIO_MODO='cliente', DESC_TIPO='no';
+let TIPO='local', ENVIO_MODO='cliente', DESC_TIPO='no', COD_ENVIO=COD_ENVIOS[0];
+function setCodEnvio(n){
+  COD_ENVIO=n;
+  COD_ENVIOS.forEach(x=>{ const b=document.getElementById('cod-e-'+x); if(b) b.classList.toggle('on',x===n); });
+  calcTotales();
+}
 function setDesc(t){
   DESC_TIPO=t;
   document.getElementById('d-no').classList.toggle('on',t==='no');
@@ -380,7 +426,12 @@ function setTipo(t){
   TIPO=t;
   document.getElementById('t-local').classList.toggle('on',t==='local');
   document.getElementById('t-drop').classList.toggle('on',t==='dropshipping');
-  document.getElementById('drop-fields').style.display = t==='dropshipping'?'block':'none';
+  document.getElementById('t-cod').classList.toggle('on',t==='contraentrega');
+  // dropshipping y contra entrega piden dirección; cada uno con su bloque de envío
+  document.getElementById('drop-fields').style.display = (t==='dropshipping'||t==='contraentrega')?'block':'none';
+  document.getElementById('servientrega-fields').style.display = t==='dropshipping'?'block':'none';
+  document.getElementById('cod-fields').style.display = t==='contraentrega'?'block':'none';
+  document.getElementById('pago-wrap').style.display = t==='contraentrega'?'none':'block';
   calcTotales();
 }
 function setEnvio(m){
@@ -397,6 +448,10 @@ function calcTotales(){
     const zona=document.getElementById('zona').value;
     costoEnvio=ENVIO[zona];
     envioCobrado = ENVIO_MODO==='cliente'? costoEnvio : 0;
+  } else if(TIPO==='contraentrega'){
+    // El costo real de Pardux se conoce al generar la guía; hasta entonces se asume igual
+    // a lo cobrado (neutro) y la ganancia se muestra como estimada.
+    envioCobrado = COD_ENVIO; costoEnvio = COD_ENVIO;
   }
   // Descuento: por porcentaje de los productos, o "precio final" = TOTAL que paga el
   // cliente (envío incluido). El precio final siempre se respeta tal cual lo escribe
@@ -414,24 +469,28 @@ function calcTotales(){
     <div class="totline"><span class="muted">Productos</span><span>${money(subtotal)}</span></div>
     ${TIPO==='dropshipping'?`<div class="totline"><span class="muted">Envío cobrado al cliente</span><span>${money(envioCobrado)}</span></div>
       <div class="totline"><span class="muted">Costo de envío (lo pagas tú)</span><span>-${money(costoEnvio)}</span></div>`:''}
+    ${TIPO==='contraentrega'?`<div class="totline"><span class="muted">Envío cobrado al cliente</span><span>${money(envioCobrado)}</span></div>
+      <div class="totline"><span class="muted">Costo Pardux</span><span class="muted">se registra al cargar la guía</span></div>`:''}
     ${descuentoMonto>0?`<div class="totline"><span class="muted">Descuento ${descTipo==='porcentaje'?'('+descVal+'%)':''}</span><span style="color:var(--red)">-${money(descuentoMonto)}</span></div>`:''}
     ${descuentoMonto<0?`<div class="totline"><span class="muted">Ajuste por precio final</span><span>+${money(-descuentoMonto)}</span></div>`:''}
-    <div class="totline big"><span>Total a cobrar</span><span>${money(total)}</span></div>
-    ${ES_ADMIN?`<div class="totline"><span class="muted">Tu ganancia</span><span class="gain">${money(ganancia)}</span></div>`:''}`;
+    <div class="totline big"><span>${TIPO==='contraentrega'?'Total que cobra Pardux al entregar':'Total a cobrar'}</span><span>${money(total)}</span></div>
+    ${ES_ADMIN?`<div class="totline"><span class="muted">Tu ganancia${TIPO==='contraentrega'?' (estimada, antes del costo Pardux)':''}</span><span class="gain">${money(ganancia)}</span></div>`:''}`;
   return {subtotal,costo,descuentoMonto,descTipo,descVal,costoEnvio,envioCobrado,total,ganancia};
 }
 async function registrarVenta(){
   if(!cart.length) return;
   const btn=document.getElementById('btn-vender'); btn.disabled=true; btn.textContent='Guardando…';
   const t=calcTotales();
-  const zona = TIPO==='dropshipping'? document.getElementById('zona').value : null;
+  const esCOD = TIPO==='contraentrega';
+  const conEnvio = TIPO==='dropshipping' || esCOD;
+  const zona = TIPO==='dropshipping'? document.getElementById('zona').value : (esCOD ? 'pardux' : null);
   const ciudad = document.getElementById('c-ciudad').value||null;
-  const direccion = TIPO==='dropshipping' ? (document.getElementById('c-direccion').value||null) : null;
+  const direccion = conEnvio ? (document.getElementById('c-direccion').value||null) : null;
   const telefono = document.getElementById('c-tel').value||null;
   const cedula = document.getElementById('c-cedula').value||null;
-  // Dropshipping necesita destino para que la proveedora envíe + teléfono para el CRM (aviso de guía)
-  if(TIPO==='dropshipping' && (!ciudad || !direccion || !telefono)){
-    toast('Dropshipping necesita teléfono, ciudad y dirección'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
+  // Dropshipping y contra entrega necesitan destino + teléfono (para el courier y el CRM)
+  if(conEnvio && (!ciudad || !direccion || !telefono)){
+    toast((esCOD?'Contra entrega':'Dropshipping')+' necesita teléfono, ciudad y dirección'); btn.disabled=false; btn.textContent='✅ Registrar venta'; return;
   }
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
@@ -440,9 +499,10 @@ async function registrarVenta(){
     ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
-    metodo_pago:document.getElementById('pago').value,
+    metodo_pago: esCOD ? 'Contra entrega' : document.getElementById('pago').value,
     notas: direccion  // guardamos la dirección exacta aquí
   };
+  if(esCOD){ venta.estado_envio='por_despachar'; venta.estado_envio_at=new Date().toISOString(); }
   const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();
   if(error){ toast('Error: '+error.message); btn.disabled=false; btn.textContent='✅ Registrar venta'; return; }
   const esLocal = TIPO==='local';
@@ -453,7 +513,8 @@ async function registrarVenta(){
   venta.direccion = direccion;
   const folio = vRow.folio;
   await sincronizarCRM(venta, shareItems, folio);
-  cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no';
+  cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no'; COD_ENVIO=COD_ENVIOS[0];
+  if(esCOD) actualizarBadgeEnvios();
   // Asesor → pantalla para compartir a Homero. Admin → solo confirma.
   if(!ES_ADMIN) mostrarCompartir(folio, venta, shareItems);
   else { toast('✅ Venta #'+folio+' registrada'); renderVender(); }
@@ -463,19 +524,21 @@ async function registrarVenta(){
 // entre las ventas web y los pedidos que llegan por conversación de WhatsApp.
 async function sincronizarCRM(venta, items, folio){
   const phone = (venta.cliente_telefono||'').replace(/\D/g,'');
-  const statusCRM = venta.tipo==='local' ? 'entregado' : 'pagado';
+  // Contra entrega todavía no está cobrada: queda "pendiente" hasta que Pardux entregue.
+  const statusCRM = venta.tipo==='local' ? 'entregado' : venta.tipo==='contraentrega' ? 'pendiente' : 'pagado';
+  const statusCliente = statusCRM==='pendiente' ? 'pedido_pendiente' : statusCRM;
   if(phone){
     try{
       await db.from('clientes').upsert({
         phone, name: venta.cliente_nombre||'Cliente', city: venta.ciudad||null,
-        status: statusCRM, source: 'ventas-app', last_contact: new Date().toISOString()
+        status: statusCliente, source: 'ventas-app', last_contact: new Date().toISOString()
       }, { onConflict: 'phone' });
     }catch(e){ /* no bloquea el registro de la venta */ }
   }
   const corto = n => (n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
   const itemsPedido = items.map(i=>({ nombre:(i.cantidad>1?i.cantidad+'x ':'')+corto(i.nombre), color:i.color||'', talla:i.talla||'', precio:i.precio_unit }));
   const notas = [
-    `Venta #${folio} · ${venta.tipo==='local'?'🏬 Local':'📦 Dropshipping'} · Vendedor: ${venta.vendedor}`,
+    `Venta #${folio} · ${venta.tipo==='local'?'🏬 Local':venta.tipo==='contraentrega'?'🚚 Contra entrega (Pardux)':'📦 Dropshipping'} · Vendedor: ${venta.vendedor}`,
     venta.cedula ? `CI: ${venta.cedula}` : null,
     venta.direccion ? `Dirección: ${venta.direccion}` : null,
     venta.descuento_monto>0 ? `Descuento aplicado: -${money(venta.descuento_monto)}` : null,
@@ -495,7 +558,12 @@ function waLink(venta, items, folio){
   const corto = n => (n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
   const prenda = i => `• ${i.cantidad}x ${corto(i.nombre)} ${i.color||''} ${i.talla||''}`.replace(/ +/g,' ').trim();
   let msg;
-  if(venta.tipo==='dropshipping'){
+  if(venta.tipo==='contraentrega'){
+    // Pedido a la proveedora de Guayaquil, despachado por Pardux con cobro al cliente
+    const lineas = items.map(prenda).join('\n');
+    const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
+    msg = `🚚 PEDIDO CONTRA ENTREGA #${folio} (Pardux)\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 A pagar a proveedora: ${money(costoP)} (prendas)\n💰 *Pardux cobra al cliente: ${money(venta.total)}*\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
+  } else if(venta.tipo==='dropshipping'){
     // Pedido para la proveedora: SIN precios de venta, con costo a pagar + envío + destino
     const lineas = items.map(prenda).join('\n');
     const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
@@ -520,6 +588,144 @@ function mostrarCompartir(folio, venta, items){
       <a class="btn btn-green" style="display:block;padding:1rem;text-decoration:none;font-size:16px" href="${waLink(venta,items,folio)}" target="_blank" rel="noopener">📲 Compartir a WhatsApp</a>
       <button class="btn btn-ghost" style="width:100%;margin-top:.8rem;padding:.85rem" onclick="renderVender()">➕ Registrar otra venta</button>
     </div>`;
+}
+
+// ════════════ ENVÍOS — contra entrega (Pardux) ════════════
+// Flujo: por_despachar → en_camino (guía + link de Pardux) → entregado (cobrado) → depositado.
+// Si el cliente no recibe: rechazado → la venta queda anulada (no suma ingresos ni comisión).
+let ENV_FILTRO='activos';
+const ENV_ACTIVOS=['por_despachar','en_camino','entregado'];
+async function actualizarBadgeEnvios(){
+  const b=document.getElementById('nav-envios'); if(!b) return;
+  const { data, error } = await db.from('ventas').select('id').eq('tipo','contraentrega').in('estado_envio',['por_despachar','en_camino']);
+  const n = error ? 0 : (data||[]).length;
+  b.textContent = n; b.style.display = n>0 ? '' : 'none';
+}
+function envFiltro(f){ ENV_FILTRO=f; renderEnvios(); }
+async function renderEnvios(){
+  const v=document.getElementById('view');
+  v.innerHTML='<div class="empty">Cargando envíos…</div>';
+  const { data, error } = await db.from('ventas').select('*').eq('tipo','contraentrega').order('fecha',{ascending:false}).limit(300);
+  if(error){ v.innerHTML=`<div class="card"><b>No se pudo cargar Envíos</b><div class="muted" style="margin-top:.4rem">${error.message}</div></div>`; return; }
+  const todas=data||[];
+  window._envCache=todas;
+  const ids=todas.map(x=>x.id); let items=[];
+  if(ids.length){ const {data:it}=await db.from('venta_items').select('venta_id,nombre,talla,cantidad').in('venta_id',ids); items=it||[]; }
+  const itemsBy={}; items.forEach(i=>{ (itemsBy[i.venta_id]=itemsBy[i.venta_id]||[]).push(i); });
+  const cuenta=e=>todas.filter(x=>x.estado_envio===e);
+  const suma=arr=>arr.reduce((s,x)=>s+(+x.total||0),0);
+  const pd=cuenta('por_despachar'), ec=cuenta('en_camino'), en=cuenta('entregado'), dp=cuenta('depositado'), rc=cuenta('rechazado');
+  const lista = ENV_FILTRO==='activos' ? todas.filter(x=>ENV_ACTIVOS.includes(x.estado_envio))
+              : ENV_FILTRO==='todos' ? todas : todas.filter(x=>x.estado_envio===ENV_FILTRO);
+  const chip=(f,l)=>`<button onclick="envFiltro('${f}')" style="padding:.4rem .8rem;border-radius:20px;border:1px solid ${ENV_FILTRO===f?'var(--gold)':'var(--border)'};background:${ENV_FILTRO===f?'var(--gold)':'var(--surface2)'};color:${ENV_FILTRO===f?'#000':'var(--text)'};font-size:12px">${l}</button>`;
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  v.innerHTML = `
+    <h2 class="page">Envíos contra entrega <span class="muted" style="font-size:13px">· Pardux</span></h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">📝 Por despachar</div><div class="v">${pd.length}</div></div>
+      <div class="kpi"><div class="l">🚚 En camino</div><div class="v">${ec.length}</div><div class="muted" style="font-size:11px">${money(suma(ec))} por cobrar</div></div>
+      <div class="kpi"><div class="l">✅ Entregado, sin depositar</div><div class="v" style="color:var(--gold)">${money(suma(en))}</div><div class="muted" style="font-size:11px">${en.length} pedido(s) · Pardux debe</div></div>
+      <div class="kpi"><div class="l">↩️ Rechazados</div><div class="v" style="color:var(--red)">${rc.length}</div></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem">
+      ${chip('activos','Activos')}${chip('por_despachar','Por despachar')}${chip('en_camino','En camino')}${chip('entregado','Entregados')}${chip('depositado','Depositados')}${chip('rechazado','Rechazados')}${chip('todos','Todos')}
+    </div>
+    ${lista.length===0?'<div class="empty">No hay envíos en esta vista</div>':lista.map(x=>envCard(x,itemsBy[x.id]||[],corto)).join('')}`;
+  actualizarBadgeEnvios();
+}
+function envCard(x,its,corto){
+  const st=x.estado_envio||'por_despachar', E=EST_ENVIO[st]||EST_ENVIO.por_despachar;
+  const fecha=new Date(x.fecha).toLocaleString('es-EC',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  const editable = st==='por_despachar' || st==='en_camino';
+  const esc=s=>String(s||'').replace(/"/g,'&quot;');
+  let acciones='';
+  if(editable){
+    acciones += `
+      <div class="grid2" style="margin-top:.6rem">
+        <input class="fld" id="guia-${x.id}" placeholder="N° de guía Pardux" value="${esc(x.guia_envio)}">
+        <input class="fld" id="costo-${x.id}" type="number" step="0.01" placeholder="Costo Pardux $" value="${x.guia_envio && x.costo_envio!=null && +x.costo_envio!==+x.envio_cobrado ? (+x.costo_envio).toFixed(2) : ''}">
+      </div>
+      <input class="fld" id="link-${x.id}" placeholder="Link de seguimiento de Pardux (https://…)" value="${esc(x.tracking_url)}" style="margin-top:.5rem">
+      <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="guardarGuiaEnvio('${x.id}')">${st==='por_despachar'?'🚚 Guardar guía y marcar en camino':'💾 Actualizar guía'}</button>`;
+  }
+  if(st==='en_camino'){
+    acciones += `<div class="grid2" style="margin-top:.5rem">
+      <button class="btn btn-green" onclick="cambiarEstadoEnvio('${x.id}','entregado')">✅ Entregado y cobrado</button>
+      <button class="btn btn-red" onclick="cambiarEstadoEnvio('${x.id}','rechazado')">↩️ Rechazado</button></div>`;
+  }
+  if(st==='por_despachar'){
+    acciones += `<button class="btn btn-ghost" style="width:100%;margin-top:.5rem;font-size:12px" onclick="cambiarEstadoEnvio('${x.id}','rechazado')">↩️ Cancelar / rechazado</button>`;
+  }
+  if(st==='entregado' && ES_ADMIN){
+    acciones += `<button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="cambiarEstadoEnvio('${x.id}','depositado')">💰 Pardux ya depositó</button>`;
+  }
+  if(st==='rechazado' && ES_ADMIN){
+    acciones += `<button class="btn btn-ghost" style="width:100%;margin-top:.6rem;font-size:12px" onclick="cambiarEstadoEnvio('${x.id}','en_camino')">↺ Reabrir (marcado por error)</button>`;
+  }
+  return `
+    <div class="card env-card st-${st}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><b>Venta #${x.folio}</b> <span class="muted" style="font-size:12px">· ${fecha} · ${x.vendedor||''}</span></div>
+        <span class="badge ${E.badge}">${E.txt}</span>
+      </div>
+      <div style="font-size:13px;margin-top:.4rem">🧍 ${x.cliente_nombre||'Cliente'} · 📞 ${x.cliente_telefono||'—'}</div>
+      <div style="font-size:13px">📍 ${x.ciudad||'—'} · 🏠 ${x.notas||'—'}</div>
+      <div class="muted" style="font-size:12px;margin-top:.3rem">${its.map(i=>`${i.cantidad}x ${corto(i.nombre)} ${i.talla||''}`).join(', ')||'—'}</div>
+      <div class="totline" style="margin-top:.4rem"><span>💰 Cobra Pardux</span><b>${money(x.total)}</b></div>
+      ${x.guia_envio?`<div style="font-size:13px;margin-top:.2rem">📦 Guía: <b>${x.guia_envio}</b>${x.tracking_url?` · <a href="${esc(x.tracking_url)}" target="_blank" rel="noopener" style="color:var(--gold)">Ver seguimiento ↗</a>`:''}</div>`:''}
+      ${acciones}
+    </div>`;
+}
+// Busca el pedido del CRM que corresponde a una venta (se crea con notes "Venta #N · …")
+async function pedidoDeVenta(folio){
+  const { data } = await db.from('pedidos').select('id,notes,cliente_phone,status').like('notes',`Venta #${folio} ·%`).limit(1);
+  return (data||[])[0]||null;
+}
+async function guardarGuiaEnvio(id){
+  const x=(window._envCache||[]).find(v=>v.id===id); if(!x) return;
+  const guia=(document.getElementById('guia-'+id).value||'').trim();
+  const link=(document.getElementById('link-'+id).value||'').trim();
+  const costoTxt=(document.getElementById('costo-'+id).value||'').trim();
+  if(!guia){ toast('Escribe el número de guía de Pardux'); return; }
+  if(link && !/^https?:\/\//i.test(link)){ toast('El link debe empezar con https://'); return; }
+  const upd={ guia_envio:guia, tracking_url:link||null, estado_envio_at:new Date().toISOString() };
+  if(x.estado_envio==='por_despachar') upd.estado_envio='en_camino';
+  if(costoTxt!==''){
+    const c=parseFloat(costoTxt);
+    if(isNaN(c)||c<0){ toast('Costo Pardux inválido'); return; }
+    upd.costo_envio=c;
+    upd.ganancia=Math.round(((+x.total)-(+x.costo_productos)-c)*100)/100;
+  }
+  const { error } = await db.from('ventas').update(upd).eq('id',id);
+  if(error){ toast('Error: '+error.message); return; }
+  // Reflejar en el CRM: guía + estado enviado + link en las notas
+  const p=await pedidoDeVenta(x.folio);
+  if(p){
+    let notes=(p.notes||'').replace(/ — Seguimiento Pardux: \S+/,'');
+    if(link) notes+=` — Seguimiento Pardux: ${link}`;
+    await db.from('pedidos').update({ guia_servientrega:guia, status: p.status==='entregado'?'entregado':'enviado', notes, updated_at:new Date().toISOString() }).eq('id',p.id);
+  }
+  toast(upd.estado_envio==='en_camino'?'🚚 Pedido en camino':'✓ Guía actualizada');
+  renderEnvios();
+}
+async function cambiarEstadoEnvio(id, nuevo){
+  const x=(window._envCache||[]).find(v=>v.id===id); if(!x) return;
+  if(nuevo==='rechazado' && !confirm(`¿Marcar la venta #${x.folio} como RECHAZADA?\nLa venta queda anulada: no suma ingresos ni comisión.`)) return;
+  if(nuevo==='depositado' && !confirm(`¿Confirmas que Pardux ya depositó ${money(x.total)} de la venta #${x.folio}?`)) return;
+  const upd={ estado_envio:nuevo, estado_envio_at:new Date().toISOString() };
+  if(nuevo==='rechazado') upd.anulada=true;
+  if(x.estado_envio==='rechazado' && nuevo!=='rechazado') upd.anulada=false;   // reabrir
+  const { error } = await db.from('ventas').update(upd).eq('id',id);
+  if(error){ toast('Error: '+error.message); return; }
+  const p=await pedidoDeVenta(x.folio);
+  if(p){
+    const stPed = nuevo==='rechazado'?'cancelado' : (nuevo==='entregado'||nuevo==='depositado')?'entregado' : 'enviado';
+    const stCli = {cancelado:'perdido', entregado:'entregado', enviado:'pedido_pendiente'}[stPed];
+    await db.from('pedidos').update({ status:stPed, updated_at:new Date().toISOString() }).eq('id',p.id);
+    if(p.cliente_phone) await db.from('clientes').update({ status:stCli }).eq('phone',p.cliente_phone);
+  }
+  toast({entregado:'✅ Entregado y cobrado', depositado:'💰 Marcado como depositado', rechazado:'↩️ Venta anulada por rechazo', en_camino:'↺ Reabierto'}[nuevo]||'✓');
+  renderEnvios();
 }
 
 // ════════════ INVENTARIO ════════════
@@ -622,25 +828,29 @@ async function renderReportes(){
   const topTalla=Object.entries(porTalla).sort((a,b)=>b[1]-a[1]);
   // comisiones: $ por prenda, solo vendedores que NO son admin (Homero). dropship vs local
   const COM_LOCAL=parseFloat(CONFIG.comision_local||'1'), COM_DROP=parseFloat(CONFIG.comision_dropship||'2');
+  const COM_COD=parseFloat(CONFIG.comision_contraentrega||CONFIG.comision_dropship||'2');
+  // Contra entrega no es plata hasta que Pardux entrega y cobra: fuera de ingresos/comisiones hasta entonces
+  const ventasCob=ventas.filter(v=>v.tipo!=='contraentrega' || COD_COBRADO(v));
+  const codTransito=ventas.filter(v=>v.tipo==='contraentrega' && !COD_COBRADO(v));
   const comByVend={};
-  ventas.forEach(v=>{
+  ventasCob.forEach(v=>{
     if(ADMIN_NAMES.includes(v.vendedor)) return;
     const units=(itemsByVenta[v.id]||[]).reduce((s,i)=>s+i.cantidad,0);
-    const tarifa=v.tipo==='dropshipping'?COM_DROP:COM_LOCAL;
-    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifa;
+    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifaCom(v);
     const k=v.vendedor||'—';
-    comByVend[k]=comByVend[k]||{units:0,com:0,uLocal:0,uDrop:0};
+    comByVend[k]=comByVend[k]||{units:0,com:0,uLocal:0,uDrop:0,uCod:0};
     comByVend[k].units+=units; comByVend[k].com+=com;
-    if(v.tipo==='dropshipping') comByVend[k].uDrop+=units; else comByVend[k].uLocal+=units;
+    if(v.tipo==='dropshipping') comByVend[k].uDrop+=units; else if(v.tipo==='contraentrega') comByVend[k].uCod+=units; else comByVend[k].uLocal+=units;
   });
   const comList=Object.entries(comByVend).sort((a,b)=>b[1].com-a[1].com);
   const comTotal=comList.reduce((s,e)=>s+e[1].com,0);
   const comMesHTML=await comisionesPorMesHTML(COM_LOCAL,COM_DROP);
   const sum=(arr,k)=>arr.reduce((s,x)=>s+(+x[k]||0),0);
-  const ingresos=sum(ventas,'total'), ganancia=sum(ventas,'ganancia'), descuentos=sum(ventas,'descuento_monto');
+  const ingresos=sum(ventasCob,'total'), ganancia=sum(ventasCob,'ganancia'), descuentos=sum(ventasCob,'descuento_monto');
   const local=ventas.filter(x=>x.tipo==='local'), drop=ventas.filter(x=>x.tipo==='dropshipping');
+  const codCob=ventasCob.filter(x=>x.tipo==='contraentrega');
   const porDia={}, porVend={};
-  ventas.forEach(x=>{
+  ventasCob.forEach(x=>{
     const d=x.fecha.slice(0,10); porDia[d]=porDia[d]||{n:0,ing:0,gan:0}; porDia[d].n++; porDia[d].ing+=+x.total; porDia[d].gan+=+x.ganancia;
     const k=x.vendedor||'—'; porVend[k]=porVend[k]||{n:0,gan:0}; porVend[k].n++; porVend[k].gan+=+x.ganancia;
   });
@@ -665,10 +875,10 @@ async function renderReportes(){
         <div><label class="lbl">Desde</label><input class="fld" type="date" id="rep-desde" value="${fmtFecha(REP_DESDE)}" onchange="rangoCustom()"></div>
         <div><label class="lbl">Hasta</label><input class="fld" type="date" id="rep-hasta" value="${fmtFecha(REP_HASTA)}" onchange="rangoCustom()"></div>
       </div>
-      <div class="muted" style="font-size:12px;margin-top:.6rem">📅 <b>${REP_LABEL}</b> · ${ventas.length} ventas</div>
+      <div class="muted" style="font-size:12px;margin-top:.6rem">📅 <b>${REP_LABEL}</b> · ${ventasCob.length} ventas${codTransito.length?` · ${codTransito.length} contra entrega en tránsito`:''}</div>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="l">Ventas</div><div class="v">${ventas.length}</div></div>
+      <div class="kpi"><div class="l">Ventas</div><div class="v">${ventasCob.length}</div></div>
       <div class="kpi"><div class="l">Ingresos</div><div class="v">${money(ingresos)}</div></div>
       <div class="kpi"><div class="l">Ganancia</div><div class="v gain">${money(ganancia)}</div></div>
       <div class="kpi"><div class="l">Descuentos dados</div><div class="v" style="color:var(--red);font-size:20px">${money(descuentos)}</div></div>
@@ -677,6 +887,8 @@ async function renderReportes(){
       <b>Por canal</b>
       <div class="totline" style="margin-top:.5rem"><span><span class="badge b-local">LOCAL</span> ${local.length} ventas</span><span class="gain">${money(sum(local,'ganancia'))}</span></div>
       <div class="totline"><span><span class="badge b-drop">DROPSHIP</span> ${drop.length} ventas</span><span class="gain">${money(sum(drop,'ganancia'))}</span></div>
+      <div class="totline"><span><span class="badge b-cod">CONTRA ENTREGA</span> ${codCob.length} cobradas</span><span class="gain">${money(sum(codCob,'ganancia'))}</span></div>
+      ${codTransito.length?`<div class="totline" style="font-size:12px"><span class="muted">🚚 En tránsito (aún sin cobrar) — ${codTransito.length}</span><span class="muted">${money(sum(codTransito,'total'))}</span></div>`:''}
     </div>
     ${devs.length ? `
     <div class="card" style="border-left:3px solid var(--red)">
@@ -708,10 +920,10 @@ async function renderReportes(){
       </tbody></table>
     </div>
     <div class="card">
-      <b>💵 Comisiones a pagar</b> <span class="muted" style="font-size:12px">— $${COM_DROP.toFixed(0)}/prenda dropship · $${COM_LOCAL.toFixed(0)}/prenda local (no aplica a Homero)</span>
+      <b>💵 Comisiones a pagar</b> <span class="muted" style="font-size:12px">— $${COM_DROP.toFixed(0)}/prenda dropship · $${COM_LOCAL.toFixed(0)}/prenda local · $${COM_COD.toFixed(0)}/prenda contra entrega (al entregarse y cobrarse) — no aplica a Homero</span>
       ${comList.length===0?'<div class="empty">Sin comisiones en este rango</div>':`
       <table style="margin-top:.5rem"><thead><tr><th>Vendedor</th><th>Prendas</th><th style="text-align:right">A pagar</th></tr></thead><tbody>
-      ${comList.map(([k,o])=>`<tr><td>${k}<br><small class="muted">${o.uLocal} local · ${o.uDrop} dropship</small></td><td>${o.units}</td><td style="text-align:right;font-weight:700;color:var(--gold)">${money(o.com)}</td></tr>`).join('')}
+      ${comList.map(([k,o])=>`<tr><td>${k}<br><small class="muted">${o.uLocal} local · ${o.uDrop} dropship${o.uCod?` · ${o.uCod} contra entrega`:''}</small></td><td>${o.units}</td><td style="text-align:right;font-weight:700;color:var(--gold)">${money(o.com)}</td></tr>`).join('')}
       <tr><td><b>TOTAL</b></td><td><b>${comList.reduce((s,e)=>s+e[1].units,0)}</b></td><td style="text-align:right;font-weight:700;color:var(--gold)">${money(comTotal)}</td></tr>
       </tbody></table>`}
     </div>
@@ -735,7 +947,7 @@ async function renderReportes(){
       <table style="margin-top:.5rem"><thead><tr><th>#</th><th>Tipo</th><th>Vendedor</th><th>Total</th><th>Gan.</th></tr></thead><tbody>
       ${ventas.slice(0,40).map(x=>`<tr onclick="verVenta('${x.id}')" style="cursor:pointer">
         <td>${x.folio}</td>
-        <td><span class="badge ${x.tipo==='local'?'b-local':'b-drop'}">${x.tipo==='local'?'LOC':'DROP'}</span></td>
+        <td><span class="badge ${TIPO_BADGE(x.tipo)[0]}">${TIPO_BADGE(x.tipo)[2]}</span>${x.tipo==='contraentrega'&&!COD_COBRADO(x)?' <small class="muted">en tránsito</small>':''}</td>
         <td>${x.vendedor||'—'}</td>
         <td>${money(x.total)}</td>
         <td class="gain">${money(x.ganancia)}</td>
@@ -757,8 +969,7 @@ async function comisionesPorMesHTML(COM_LOCAL,COM_DROP){
   noAdmin.forEach(v=>{
     const mes=v.fecha.slice(0,7);
     const units=unitsByVenta[v.id]||0;
-    const tarifa=v.tipo==='dropshipping'?COM_DROP:COM_LOCAL;
-    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifa;
+    const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifaCom(v);
     porMes[mes]=porMes[mes]||{};
     porMes[mes][v.vendedor]=(porMes[mes][v.vendedor]||0)+com;
   });
@@ -810,22 +1021,22 @@ function verVenta(id){
       <h3 style="font-size:17px">Venta #${v.folio}</h3>
       <button onclick="closeModal()" class="btn btn-ghost" style="padding:.3rem .7rem">✕</button>
     </div>
-    <div class="muted" style="font-size:12px;margin-bottom:.7rem">${fecha} · <span class="badge ${v.tipo==='local'?'b-local':'b-drop'}">${v.tipo==='local'?'LOCAL':'DROPSHIP'}</span> · ${v.vendedor||''}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:.7rem">${fecha} · <span class="badge ${TIPO_BADGE(v.tipo)[0]}">${TIPO_BADGE(v.tipo)[1]}</span> · ${v.vendedor||''}</div>
     ${cli?`<div style="font-size:13px;margin-bottom:.3rem">🧍 <b>Cliente:</b> ${cli}</div>`:''}
-    ${v.tipo==='dropshipping'&&v.notas?`<div style="font-size:13px;margin-bottom:.6rem">🏠 <b>Dirección:</b> ${v.notas}</div>`:''}
+    ${v.tipo!=='local'&&v.notas?`<div style="font-size:13px;margin-bottom:.6rem">🏠 <b>Dirección:</b> ${v.notas}</div>`:''}
+    ${v.tipo==='contraentrega'?`<div style="font-size:13px;margin-bottom:.6rem">🚚 <b>Pardux:</b> ${(EST_ENVIO[v.estado_envio]||EST_ENVIO.por_despachar).txt}${v.guia_envio?` · guía <b>${v.guia_envio}</b>`:''}${v.tracking_url?` · <a href="${v.tracking_url}" target="_blank" rel="noopener" style="color:var(--gold)">seguimiento ↗</a>`:''}</div>`:''}
     <div style="border-top:1px solid var(--border);padding-top:.5rem">
     ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
     </div>
     ${v.descuento_monto>0?`<div class="totline" style="color:var(--red)"><span>Descuento</span><span>-${money(v.descuento_monto)}</span></div>`:''}
     ${v.descuento_monto<0?`<div class="totline"><span>Ajuste por precio final</span><span>+${money(-v.descuento_monto)}</span></div>`:''}
-    ${v.tipo==='dropshipping'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
+    ${v.tipo!=='local'?`<div class="totline"><span class="muted">Envío</span><span>${money(v.envio_cobrado)}</span></div>`:''}
     <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}
     ${(()=>{
       if(ADMIN_NAMES.includes(v.vendedor)) return '';
       const u=its.reduce((s,i)=>s+i.cantidad,0);
-      const tarifa=v.tipo==='dropshipping'?parseFloat(CONFIG.comision_dropship||'2'):parseFloat(CONFIG.comision_local||'1');
-      const comCalc=u*tarifa;
+      const comCalc=u*tarifaCom(v);
       const comActual=v.comision_ajustada!=null?+v.comision_ajustada:comCalc;
       if(!ES_ADMIN) return comActual>0?`<div class="totline"><span class="muted">Comisión ${v.vendedor}</span><span style="color:var(--gold)">${money(comActual)}</span></div>`:'';
       return `<div class="totline"><span class="muted">Comisión ${v.vendedor}${v.comision_ajustada!=null?' (ajustada)':' (calculada: '+money(comCalc)+')'}</span><span style="color:var(--gold);font-weight:600">${money(comActual)}</span></div>

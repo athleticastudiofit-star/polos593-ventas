@@ -265,6 +265,7 @@ async function renderVender(){
   v.innerHTML='<div class="empty">Cargando…</div>';
   await loadProductos();
   v.innerHTML = `
+    <div id="cod-banner"></div>
     <h2 class="page">Nueva venta</h2>
     <div class="card">
       <div id="wizard"></div>
@@ -330,6 +331,7 @@ async function renderVender(){
   SEL={genero:null,prenda:null,color:null};
   renderWizard();
   renderCart();
+  pintarBannerCOD();
 }
 
 // ── Asistente guiado de selección: Género → Prenda → Color → Talla ──
@@ -617,6 +619,18 @@ async function actualizarBadgeEnvios(){
   b.textContent = n; b.style.display = n>0 ? '' : 'none';
 }
 function envFiltro(f){ ENV_FILTRO=f; renderEnvios(); }
+// Aviso arriba de "Nueva venta": envíos contra entrega que siguen sin cobrarse
+async function pintarBannerCOD(){
+  const el=document.getElementById('cod-banner'); if(!el) return;
+  const { data, error } = await db.from('ventas').select('total').eq('tipo','contraentrega').in('estado_envio',['por_despachar','en_camino']);
+  const lista = error ? [] : (data||[]);
+  if(!lista.length){ el.innerHTML=''; return; }
+  const monto=lista.reduce((s,x)=>s+(+x.total||0),0);
+  el.innerHTML = `<div class="card" onclick="go('envios')" style="cursor:pointer;border-left:3px solid var(--yellow);display:flex;justify-content:space-between;align-items:center;gap:.6rem">
+    <div><b>🚚 ${lista.length} envío${lista.length>1?'s':''} contra entrega por cobrar</b>
+      <div class="muted" style="font-size:12px">Pardux debe cobrar ${money(monto)} · márcalo cuando se entregue</div></div>
+    <span style="color:var(--gold);font-weight:600;white-space:nowrap">Ver →</span></div>`;
+}
 async function renderEnvios(){
   const v=document.getElementById('view');
   v.innerHTML='<div class="empty">Cargando envíos…</div>';
@@ -625,7 +639,11 @@ async function renderEnvios(){
   const todas=data||[];
   window._envCache=todas;
   const ids=todas.map(x=>x.id); let items=[];
-  if(ids.length){ const {data:it}=await db.from('venta_items').select('venta_id,nombre,talla,cantidad').in('venta_id',ids); items=it||[]; }
+  if(ids.length){ const {data:it}=await db.from('venta_items').select('venta_id,sku,nombre,talla,cantidad').in('venta_id',ids); items=it||[]; }
+  // venta_items no guarda el color: se toma del producto por SKU
+  if(!productosCache.length) await loadProductos();
+  const colorSku={}; productosCache.forEach(p=>colorSku[p.sku]=p.color);
+  items.forEach(i=>{ i.color=colorSku[i.sku]||''; });
   const itemsBy={}; items.forEach(i=>{ (itemsBy[i.venta_id]=itemsBy[i.venta_id]||[]).push(i); });
   const cuenta=e=>todas.filter(x=>x.estado_envio===e);
   const suma=arr=>arr.reduce((s,x)=>s+(+x.total||0),0);
@@ -637,8 +655,8 @@ async function renderEnvios(){
   v.innerHTML = `
     <h2 class="page">Envíos contra entrega <span class="muted" style="font-size:13px">· Pardux</span></h2>
     <div class="kpis">
-      <div class="kpi"><div class="l">📝 Por despachar</div><div class="v">${pd.length}</div></div>
-      <div class="kpi"><div class="l">🚚 En camino</div><div class="v">${ec.length}</div><div class="muted" style="font-size:11px">${money(suma(ec))} por cobrar</div></div>
+      <div class="kpi"><div class="l">💰 Por cobrar</div><div class="v" style="color:var(--yellow)">${money(suma(pd)+suma(ec))}</div><div class="muted" style="font-size:11px">${pd.length+ec.length} pedido(s) · ${ec.length} en camino</div></div>
+      <div class="kpi"><div class="l">📝 Sin guía todavía</div><div class="v">${pd.length}</div></div>
       <div class="kpi"><div class="l">✅ Entregado, sin depositar</div><div class="v" style="color:var(--gold)">${money(suma(en))}</div><div class="muted" style="font-size:11px">${en.length} pedido(s) · Pardux debe</div></div>
       <div class="kpi"><div class="l">↩️ Rechazados</div><div class="v" style="color:var(--red)">${rc.length}</div></div>
     </div>
@@ -663,13 +681,11 @@ function envCard(x,its,corto){
       <input class="fld" id="link-${x.id}" placeholder="Link de seguimiento de Pardux (https://…)" value="${esc(x.tracking_url)}" style="margin-top:.5rem">
       <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="guardarGuiaEnvio('${x.id}')">${st==='por_despachar'?'🚚 Guardar guía y marcar en camino':'💾 Actualizar guía'}</button>`;
   }
-  if(st==='en_camino'){
+  // Se puede marcar cobrado aunque la guía la haya cargado otra persona (o no se haya cargado)
+  if(st==='por_despachar' || st==='en_camino'){
     acciones += `<div class="grid2" style="margin-top:.5rem">
       <button class="btn btn-green" onclick="cambiarEstadoEnvio('${x.id}','entregado')">✅ Entregado y cobrado</button>
       <button class="btn btn-red" onclick="cambiarEstadoEnvio('${x.id}','rechazado')">↩️ Rechazado</button></div>`;
-  }
-  if(st==='por_despachar'){
-    acciones += `<button class="btn btn-ghost" style="width:100%;margin-top:.5rem;font-size:12px" onclick="cambiarEstadoEnvio('${x.id}','rechazado')">↩️ Cancelar / rechazado</button>`;
   }
   if(st==='entregado' && ES_ADMIN){
     acciones += `<button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="cambiarEstadoEnvio('${x.id}','depositado')">💰 Pardux ya depositó</button>`;
@@ -685,7 +701,7 @@ function envCard(x,its,corto){
       </div>
       <div style="font-size:13px;margin-top:.4rem">🧍 ${x.cliente_nombre||'Cliente'} · 📞 ${x.cliente_telefono||'—'}</div>
       <div style="font-size:13px">📍 ${x.ciudad||'—'} · 🏠 ${x.notas||'—'}</div>
-      <div class="muted" style="font-size:12px;margin-top:.3rem">${its.map(i=>`${i.cantidad}x ${corto(i.nombre)} ${i.talla||''}`).join(', ')||'—'}</div>
+      <div class="muted" style="font-size:12px;margin-top:.3rem">${its.map(i=>`${i.cantidad}x ${corto(i.nombre)}${i.color?' · '+i.color:''} · ${i.talla||''}`).join('<br>')||'—'}</div>
       <div class="totline" style="margin-top:.4rem"><span>💰 Cobra Pardux</span><b>${money(x.total)}</b></div>
       ${x.guia_envio?`<div style="font-size:13px;margin-top:.2rem">📦 Guía: <b>${x.guia_envio}</b>${x.tracking_url?` · <a href="${esc(x.tracking_url)}" target="_blank" rel="noopener" style="color:var(--gold)">Ver seguimiento ↗</a>`:''}</div>`:''}
       ${acciones}
@@ -726,6 +742,7 @@ async function guardarGuiaEnvio(id){
 async function cambiarEstadoEnvio(id, nuevo){
   const x=(window._envCache||[]).find(v=>v.id===id); if(!x) return;
   if(nuevo==='rechazado' && !confirm(`¿Marcar la venta #${x.folio} como RECHAZADA?\nLa venta queda anulada: no suma ingresos ni comisión.`)) return;
+  if(nuevo==='entregado' && !confirm(`¿Pardux ya entregó la venta #${x.folio} y cobró ${money(x.total)}?`)) return;
   if(nuevo==='depositado' && !confirm(`¿Confirmas que Pardux ya depositó ${money(x.total)} de la venta #${x.folio}?`)) return;
   const upd={ estado_envio:nuevo, estado_envio_at:new Date().toISOString() };
   if(nuevo==='rechazado') upd.anulada=true;

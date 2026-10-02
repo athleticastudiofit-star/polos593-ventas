@@ -275,12 +275,17 @@ async function renderVender(){
   await loadProductos();
   v.innerHTML = `
     <div id="cod-banner"></div>
-    <h2 class="page">Nueva venta</h2>
+    <div class="seg" style="margin-bottom:1rem">
+      <button class="${MODO==='venta'?'on':''}" onclick="setModo('venta')">🧾 Venta</button>
+      <button class="${MODO==='stock'?'on':''}" onclick="setModo('stock')">📥 Pedido para stock</button>
+    </div>
+    <h2 class="page">${MODO==='stock'?'Pedido a la proveedora para la tienda':'Nueva venta'}</h2>
+    ${MODO==='stock'?'<div class="muted" style="font-size:12px;margin:-.6rem 0 1rem">No es una venta: las prendas se suman al inventario de la tienda cuando llegan, y se le pagan a la proveedora con la semana.</div>':''}
     <div class="card">
       <div id="wizard"></div>
     </div>
     <div class="card">
-      <div class="row" style="justify-content:space-between"><b>🛒 Carrito</b><span class="muted" id="cart-count">0 items</span></div>
+      <div class="row" style="justify-content:space-between"><b>${MODO==='stock'?'📥 Prendas a pedir':'🛒 Carrito'}</b><span class="muted" id="cart-count">0 items</span></div>
       <div id="cart"></div>
     </div>
     <div class="card" id="checkout" style="display:none">
@@ -341,10 +346,12 @@ async function renderVender(){
       <button class="btn btn-green" style="width:100%;margin-top:.8rem;padding:.9rem" id="btn-vender" onclick="registrarVenta()">✅ Registrar venta</button>
     </div>
   `;
+  v.insertAdjacentHTML('beforeend', '<div class="card" id="stock-checkout" style="display:none"></div><div id="stock-lista"></div>');
   SEL={genero:null,prenda:null,color:null};
   renderWizard();
   renderCart();
   pintarBannerCOD();
+  if(MODO==='stock') renderStockLista();
   revCargarReferidos();
 }
 
@@ -364,7 +371,7 @@ const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)
 const prendaIcon  = t => PRENDA_ICON[t] || (String(t).startsWith('liq_') ? '🏷️' : '👕');
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
 
-const prodsGenero = g => productosCache.filter(p => p.genero===g || p.genero==='unisex');
+const prodsGenero = g => productosCache.filter(p => (p.genero===g || p.genero==='unisex') && !(MODO==='stock' && String(p.tipo).startsWith('liq_')));
 function pickGenero(g){ SEL={genero:g,prenda:null,color:null}; renderWizard(); }
 function pickPrenda(t){ SEL.prenda=t; SEL.color=null; renderWizard(); }
 function pickColor(c){ SEL.color=c; renderWizard(); }
@@ -413,22 +420,25 @@ function chgQty(sku,d){
 function renderCart(){
   const el=document.getElementById('cart'); if(!el) return;
   document.getElementById('cart-count').textContent = cart.reduce((s,c)=>s+c.cantidad,0)+' items';
-  document.getElementById('checkout').style.display = cart.length? 'block':'none';
+  document.getElementById('checkout').style.display = cart.length && MODO==='venta' ? 'block':'none';
+  const sc=document.getElementById('stock-checkout');
+  if(sc){ sc.style.display = cart.length && MODO==='stock' ? 'block':'none'; if(MODO==='stock' && cart.length) pintarStockCheckout(); }
+  const unit = c => MODO==='stock' ? c.costo_unit : c.precio_unit;   // en stock se ve el costo de proveedora
   el.innerHTML = cart.length===0 ? '<div class="empty">Agrega productos arriba</div>' :
     cart.map(c=>`
       <div class="cart-line">
         <div style="flex:1">
           <div>${c.nombre} · ${c.color||''} · <b>${c.talla||''}</b></div>
-          <small class="muted">${c.sku} · ${money(c.precio_unit)} c/u</small>
+          <small class="muted">${c.sku} · ${money(unit(c))} c/u${MODO==='stock'?' (costo)':''}</small>
         </div>
         <div class="qtybox">
           <button onclick="chgQty('${c.sku}',-1)">−</button>
           <span style="min-width:22px;text-align:center">${c.cantidad}</span>
           <button onclick="chgQty('${c.sku}',1)">+</button>
         </div>
-        <div style="min-width:60px;text-align:right">${money(c.precio_unit*c.cantidad)}</div>
+        <div style="min-width:60px;text-align:right">${money(unit(c)*c.cantidad)}</div>
       </div>`).join('');
-  if(cart.length) calcTotales();
+  if(cart.length && MODO==='venta') calcTotales();
 }
 let TIPO='local', ENVIO_MODO='cliente', DESC_TIPO='no', COD_ENVIO=COD_ENVIOS[0];
 function setCodEnvio(n){
@@ -1170,6 +1180,122 @@ async function guardarDevolucion(ventaId){
   toast('✓ Devolución registrada'+(repuso?' · stock repuesto':''));
   closeModal();
   renderReportes();
+}
+
+// ════════════ PEDIDOS PARA STOCK — compra a la proveedora para la tienda ════════════
+// No es venta: no suma ingresos ni comisión. Se paga a la proveedora con la semana (prendas + envío
+// desde Guayaquil) y las prendas entran al stock de la tienda cuando llegan ("Llegó a la tienda").
+let MODO='venta', STOCK_ENVIO=ENVIO.provincia;
+function setModo(m){ if(m===MODO) return; MODO=m; cart=[]; renderVender(); }
+const lunesDe = d => { const x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; };
+const fechaCorta = d => new Date(d).toLocaleDateString('es-EC',{day:'numeric',month:'short'});
+function stockTotales(){
+  const costo = Math.round(cart.reduce((s,c)=>s+c.costo_unit*c.cantidad,0)*100)/100;
+  const envio = Math.max(0, +STOCK_ENVIO||0);
+  return { costo, envio, total: Math.round((costo+envio)*100)/100, unidades: cart.reduce((s,c)=>s+c.cantidad,0) };
+}
+function pintarStockCheckout(){
+  const el=document.getElementById('stock-checkout'); if(!el) return;
+  const t=stockTotales();
+  const notas=(document.getElementById('stock-notas')||{}).value||'';
+  el.innerHTML = `
+    <label class="lbl">Envío desde Guayaquil (lo pagamos nosotros)</label>
+    <input class="fld" id="stock-envio" type="number" step="0.5" min="0" value="${t.envio}" oninput="STOCK_ENVIO=this.value;pintarStockTot()" style="margin-bottom:.6rem">
+    <label class="lbl">Nota para la proveedora (opcional)</label>
+    <input class="fld" id="stock-notas" placeholder="Ej: urgente, para el fin de semana" value="${notas.replace(/"/g,'&quot;')}" style="margin-bottom:.4rem">
+    <div id="stock-tot"></div>
+    <button class="btn btn-green" style="width:100%;margin-top:.8rem;padding:.9rem" id="btn-stock" onclick="registrarPedidoStock()">📥 Registrar pedido a la proveedora</button>`;
+  pintarStockTot();
+}
+function pintarStockTot(){
+  const el=document.getElementById('stock-tot'); if(!el) return;
+  const t=stockTotales();
+  el.innerHTML = `
+    <div class="totline"><span class="muted">${t.unidades} prenda(s) a costo</span><span>${money(t.costo)}</span></div>
+    <div class="totline"><span class="muted">Envío</span><span>${money(t.envio)}</span></div>
+    <div class="totline big"><span>A pagar a la proveedora</span><span>${money(t.total)}</span></div>
+    <div class="muted" style="font-size:12px">Se suma a lo que se le paga en la semana. Las prendas entran al inventario cuando marques que llegaron.</div>`;
+}
+async function registrarPedidoStock(){
+  if(!cart.length) return;
+  const btn=document.getElementById('btn-stock'); btn.disabled=true; btn.textContent='Guardando…';
+  const t=stockTotales(), notas=(document.getElementById('stock-notas').value||'').trim()||null;
+  const { data:ped, error } = await db.from('pedidos_stock').insert({ vendedor:VENDEDOR, costo_productos:t.costo, costo_envio:t.envio, total:t.total, notas }).select().single();
+  if(error){ toast(/pedidos_stock/.test(error.message)?'Falta activar pedidos de stock en Supabase (schema-v5)':'Error: '+error.message); btn.disabled=false; btn.textContent='📥 Registrar pedido a la proveedora'; return; }
+  const items = cart.map(c=>({ pedido_id:ped.id, sku:c.sku, nombre:c.nombre, color:c.color, talla:c.talla, cantidad:c.cantidad, costo_unit:c.costo_unit }));
+  const { error:e2 } = await db.from('pedidos_stock_items').insert(items);
+  if(e2){ await db.from('pedidos_stock').delete().eq('id',ped.id); toast('Error: '+e2.message); btn.disabled=false; btn.textContent='📥 Registrar pedido a la proveedora'; return; }
+  const corto = n => (n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const lineas = items.map(i=>`• ${i.cantidad}x ${corto(i.nombre)} ${i.color||''} ${i.talla||''}`.replace(/ +/g,' ').trim()).join('\n');
+  const msg = `📥 PEDIDO PARA STOCK DE LA TIENDA #${ped.folio}\n👤 Pide: ${VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(t.total)}*\n   Prendas ${money(t.costo)} + Envío ${money(t.envio)}${notas?'\n\n📝 '+notas:''}\n\n🏬 Va a la tienda (no es venta)`;
+  const num=(CONFIG.whatsapp_admin||'593983209216').replace(/\D/g,'');
+  cart=[]; STOCK_ENVIO=ENVIO.provincia;
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="text-align:center;margin-top:1.5rem">
+      <div style="font-size:52px">📥</div>
+      <h2 class="page" style="margin:.4rem 0">Pedido de stock #${ped.folio} registrado</h2>
+      <p class="muted" style="margin-bottom:1.3rem">${t.unidades} prenda(s) · ${money(t.total)} a la proveedora. Cuando llegue, márcalo en "Pedido para stock" y se suma al inventario.</p>
+      <a class="btn btn-green" style="display:block;padding:1rem;text-decoration:none;font-size:16px" href="https://wa.me/${num}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">📲 Compartir pedido por WhatsApp</a>
+      <button class="btn btn-ghost" style="width:100%;margin-top:.8rem;padding:.85rem" onclick="renderVender()">← Volver</button>
+    </div>`;
+}
+async function renderStockLista(){
+  const el=document.getElementById('stock-lista'); if(!el) return;
+  const { data, error } = await db.from('pedidos_stock').select('*').order('fecha',{ascending:false}).limit(150);
+  if(error){ el.innerHTML=`<div class="card"><b>Pedidos de stock no disponibles</b><div class="muted" style="font-size:12px;margin-top:.3rem">Falta correr schema-v5-pedidos-stock.sql en Supabase.</div></div>`; return; }
+  const peds=data||[]; window._stockCache=peds;
+  const ids=peds.map(p=>p.id); let its=[];
+  if(ids.length){ const {data:it}=await db.from('pedidos_stock_items').select('*').in('pedido_id',ids); its=it||[]; }
+  const itemsDe=id=>its.filter(i=>i.pedido_id===id);
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const detalle=p=>itemsDe(p.id).map(i=>`${i.cantidad}x ${corto(i.nombre)} · ${i.color||''} · ${i.talla||''}`).join('<br>');
+  const enCamino=peds.filter(p=>p.estado==='pedido');
+  // Por pagar a la proveedora, agrupado por semana (lunes a domingo)
+  const porPagar=peds.filter(p=>p.estado!=='anulado' && !p.pagado_at);
+  const semanas={}; porPagar.forEach(p=>{ const k=lunesDe(p.fecha).toISOString(); (semanas[k]=semanas[k]||[]).push(p); });
+  const recibidos=peds.filter(p=>p.estado==='recibido').slice(0,5);
+  el.innerHTML = `
+    <h2 class="page" style="margin-top:1.4rem">🚚 Pedidos en camino a la tienda</h2>
+    ${enCamino.length?enCamino.map(p=>`<div class="card env-card st-en_camino">
+      <div class="row" style="justify-content:space-between"><b>Stock #${p.folio}</b><span class="muted" style="font-size:12px">${fechaCorta(p.fecha)} · ${p.vendedor||''}</span></div>
+      <div class="muted" style="font-size:12px;margin-top:.3rem">${detalle(p)}</div>
+      ${p.notas?`<div style="font-size:12px;margin-top:.3rem">📝 ${p.notas}</div>`:''}
+      <div class="totline" style="margin-top:.3rem"><span>A la proveedora</span><b>${money(p.total)}</b></div>
+      <div class="grid2" style="margin-top:.5rem">
+        <button class="btn btn-green" onclick="recibirStock('${p.id}')">✅ Llegó a la tienda</button>
+        <button class="btn btn-ghost" onclick="anularStock('${p.id}')">✖ No llegó / anular</button>
+      </div></div>`).join(''):'<div class="empty" style="padding:1rem">No hay pedidos en camino</div>'}
+    <h2 class="page" style="margin-top:1.4rem">💵 Por pagar a la proveedora <span class="muted" style="font-size:12px">· pedidos de stock</span></h2>
+    ${Object.keys(semanas).length?Object.keys(semanas).sort().map(k=>{ const ls=semanas[k], tot=ls.reduce((s,p)=>s+(+p.total||0),0), ini=new Date(k), fin=new Date(ini); fin.setDate(fin.getDate()+6);
+      return `<div class="card"><div class="row" style="justify-content:space-between"><b>Semana ${fechaCorta(ini)} – ${fechaCorta(fin)}</b><b style="color:var(--gold)">${money(tot)}</b></div>
+        <div class="muted" style="font-size:12px;margin-top:.3rem">${ls.map(p=>`#${p.folio} · ${money(p.total)}${p.estado==='recibido'?' · recibido':' · en camino'}`).join('<br>')}</div>
+        ${ES_ADMIN?`<button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="pagarSemanaStock('${k}')">💸 Ya le pagué ${money(tot)}</button>`:''}</div>`; }).join('')
+      :'<div class="empty" style="padding:1rem">Nada pendiente de pago</div>'}
+    ${recibidos.length?`<h2 class="page" style="margin-top:1.4rem">✅ Recibidos hace poco</h2><div class="card" style="padding:.4rem .8rem">${recibidos.map(p=>`<div class="prod-pick"><div><b>Stock #${p.folio}</b> <small>· llegó ${fechaCorta(p.recibido_at)}${p.recibido_por?' · '+p.recibido_por:''}</small><small style="display:block">${detalle(p)}</small></div><small>${p.pagado_at?'pagado':'por pagar'}</small></div>`).join('')}</div>`:''}`;
+}
+async function recibirStock(id){
+  const p=(window._stockCache||[]).find(x=>x.id===id); if(!p) return;
+  if(!confirm(`¿Llegó el pedido de stock #${p.folio} a la tienda?\nLas prendas se suman al inventario.`)) return;
+  const { error } = await db.rpc('recibir_pedido_stock',{ p_id:id, p_quien:VENDEDOR });
+  if(error){ toast(/PEDIDO_YA_RECIBIDO/.test(error.message)?'Ese pedido ya se había recibido':'Error: '+error.message); return; }
+  toast('✅ Prendas sumadas al inventario');
+  await loadProductos(); renderVender();
+}
+async function anularStock(id){
+  const p=(window._stockCache||[]).find(x=>x.id===id); if(!p) return;
+  if(!confirm(`¿Anular el pedido de stock #${p.folio}?\nNo se suma al inventario y no se le paga a la proveedora.`)) return;
+  const { error } = await db.from('pedidos_stock').update({ estado:'anulado' }).eq('id',id).eq('estado','pedido');
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Pedido anulado'); renderStockLista();
+}
+async function pagarSemanaStock(k){
+  const ls=(window._stockCache||[]).filter(p=>p.estado!=='anulado' && !p.pagado_at && lunesDe(p.fecha).toISOString()===k);
+  if(!ls.length) return;
+  const tot=ls.reduce((s,p)=>s+(+p.total||0),0);
+  if(!confirm(`¿Ya le pagaste ${money(tot)} a la proveedora por ${ls.length} pedido(s) de stock?`)) return;
+  const { error } = await db.from('pedidos_stock').update({ pagado_at:new Date().toISOString(), pagado_por:VENDEDOR }).in('id', ls.map(p=>p.id));
+  if(error){ toast('Error: '+error.message); return; }
+  toast('💸 Pago registrado'); renderStockLista();
 }
 
 // ════════════ VENDEDORES — programa de revendedores ════════════

@@ -143,6 +143,10 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
       <span>Envíos<span class="nav-count" id="nav-envios" style="display:none"></span></span>
     </button>
+    <button data-tab="vendedores" onclick="go('vendedores')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>
+      <span>Vendedores<span class="nav-count" id="nav-vend" style="display:none"></span></span>
+    </button>
     <button data-tab="inventario" onclick="go('inventario')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>
       Inventario
@@ -182,6 +186,9 @@ function tarifaCom(v){
 const TIPO_BADGE = t => t==='local' ? ['b-local','LOCAL','LOC'] : t==='contraentrega' ? ['b-cod','CONTRA ENTREGA','COD'] : ['b-drop','DROPSHIP','DROP'];
 const BAILEYS_URL = 'https://whatsapp-baileys-production-3e0b.up.railway.app';
 const ADMIN_NAMES = ['Homero'];          // quién ve Reportes e Inventario
+// Ventas del programa de vendedores ("Vend · Nombre" / "Kit · Nombre"): su comisión se paga en la
+// pestaña Vendedores, así que no cuentan como comisión de asesor.
+const sinComAsesor = n => ADMIN_NAMES.includes(n) || /^(Vend|Kit) · /.test(n||'');
 let VENDEDOR = localStorage.getItem('p593_vendedor') || '';
 let ES_ADMIN = localStorage.getItem('p593_admin') === '1';
 let CONFIG = {};                          // pin, pin_admin, whatsapp_admin
@@ -238,6 +245,7 @@ async function enterApp(){
   });
   go('vender');
   actualizarBadgeEnvios();
+  revBadge();
 }
 function logout(){ localStorage.removeItem('p593_auth'); location.reload(); }
 
@@ -251,6 +259,7 @@ function go(tab){
   if(tab==='envios') renderEnvios();
   if(tab==='inventario') renderInventario();
   if(tab==='reportes') renderReportes();
+  if(tab==='vendedores') renderVendedores();
 }
 
 async function loadProductos(){
@@ -289,6 +298,10 @@ async function renderVender(){
       <div class="grid2" style="margin-bottom:.6rem">
         <input class="fld" id="c-cedula" placeholder="Cédula">
         <input class="fld" id="c-ciudad" placeholder="Ciudad">
+      </div>
+      <div id="ref-wrap" style="display:none;margin-bottom:.7rem">
+        <label class="lbl">¿Llegó con código de vendedor? <span style="color:var(--soft)">(el mensaje dice "Código de vendedor")</span></label>
+        <select class="fld" id="c-ref"><option value="">No, venta directa</option></select>
       </div>
       <div id="drop-fields" style="display:none">
         <label class="lbl">Dirección exacta de envío</label>
@@ -332,6 +345,7 @@ async function renderVender(){
   renderWizard();
   renderCart();
   pintarBannerCOD();
+  revCargarReferidos();
 }
 
 // ── Asistente guiado de selección: Género → Prenda → Color → Talla ──
@@ -530,6 +544,11 @@ async function registrarVenta(){
   venta.direccion = direccion;
   const folio = vRow.folio;
   await sincronizarCRM(venta, shareItems, folio);
+  const refId = (document.getElementById('c-ref')||{}).value;
+  if(refId){
+    try{ await revRpc('rev_admin_referido',{p_pin:staffPin(), p_vendedor:refId, p_venta_id:vRow.id, p_quien:VENDEDOR}); }
+    catch(e){ alert('La venta se guardó, pero no se pudo asignar al vendedor: '+revError(e)); }
+  }
   cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no'; COD_ENVIO=COD_ENVIOS[0];
   if(esCOD) actualizarBadgeEnvios();
   // Asesor → pantalla para compartir a Homero. Admin → solo confirma.
@@ -579,20 +598,20 @@ function waLink(venta, items, folio){
     // Pedido a la proveedora de Guayaquil, despachado por Pardux con cobro al cliente
     const lineas = items.map(prenda).join('\n');
     const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
-    msg = `🚚 PEDIDO CONTRA ENTREGA #${folio} (Pardux)\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 A pagar a proveedora: ${money(costoP)} (prendas)\n💰 *Pardux cobra al cliente: ${money(venta.total)}*\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
+    msg = `🚚 PEDIDO CONTRA ENTREGA #${folio} (Pardux)\n👤 Vendedor: ${venta.vendedor||VENDEDOR}\n\n${lineas}\n\n💵 A pagar a proveedora: ${money(costoP)} (prendas)\n💰 *Pardux cobra al cliente: ${money(venta.total)}*\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
   } else if(venta.tipo==='dropshipping'){
     // Pedido para la proveedora: SIN precios de venta, con costo a pagar + envío + destino
     const lineas = items.map(prenda).join('\n');
     const costoP = items.reduce((s,i)=>s+(+i.costo_unit||0)*i.cantidad,0);
     const env = +venta.costo_envio||0;
-    msg = `📦 PEDIDO DROPSHIPPING #${folio}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(costoP+env)}*\n   Prendas ${money(costoP)} + Envío ${money(env)}\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
+    msg = `📦 PEDIDO DROPSHIPPING #${folio}\n👤 Vendedor: ${venta.vendedor||VENDEDOR}\n\n${lineas}\n\n💵 *A pagar a proveedora: ${money(costoP+env)}*\n   Prendas ${money(costoP)} + Envío ${money(env)}\n\n📍 Ciudad: ${venta.ciudad||'—'}\n🏠 Dirección: ${venta.direccion||'—'}${venta.cliente_telefono?'\n📞 '+venta.cliente_telefono:''}${venta.cliente_nombre?'\n🧍 '+venta.cliente_nombre:''}${venta.cedula?'\n🪪 CI: '+venta.cedula:''}`;
   } else {
     const lineas = items.map(i=>`${prenda(i)} (${money(i.precio_unit)})`).join('\n');
     const cli = [venta.cliente_nombre, venta.cedula, venta.cliente_telefono, venta.ciudad].filter(Boolean).join(' · ');
     const cliLine = cli ? `\n🧍 Cliente: ${cli}` : '';
     const desc = (venta.descuento_monto>0) ? `\n🏷️ Descuento: -${money(venta.descuento_monto)}`
                : (venta.descuento_monto<0) ? `\n🏷️ Ajuste por precio final: +${money(-venta.descuento_monto)}` : '';
-    msg = `🧾 NUEVA VENTA #${folio}\n🏬 LOCAL${cliLine}\n👤 Vendedor: ${VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
+    msg = `🧾 NUEVA VENTA #${folio}\n🏬 LOCAL${cliLine}\n👤 Vendedor: ${venta.vendedor||VENDEDOR}\n\n${lineas}${desc}\n\n💰 Total: ${money(venta.total)}\n💳 ${venta.metodo_pago||''}`;
   }
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
 }
@@ -866,7 +885,7 @@ async function renderReportes(){
   const codTransito=ventas.filter(v=>v.tipo==='contraentrega' && !COD_COBRADO(v));
   const comByVend={};
   ventasCob.forEach(v=>{
-    if(ADMIN_NAMES.includes(v.vendedor)) return;
+    if(sinComAsesor(v.vendedor)) return;
     const units=(itemsByVenta[v.id]||[]).reduce((s,i)=>s+i.cantidad,0);
     const com=(v.comision_ajustada!=null)?+v.comision_ajustada:units*tarifaCom(v);
     const k=v.vendedor||'—';
@@ -993,7 +1012,7 @@ async function renderReportes(){
 // Sirve para saber cuánto pagarle a cada vendedor mes a mes.
 async function comisionesPorMesHTML(COM_LOCAL,COM_DROP){
   const { data:all } = await db.from('ventas').select('*').eq('anulada',false);
-  const noAdmin=(all||[]).filter(v=>!ADMIN_NAMES.includes(v.vendedor));
+  const noAdmin=(all||[]).filter(v=>!sinComAsesor(v.vendedor));
   const ids=noAdmin.map(v=>v.id);
   let items=[];
   if(ids.length){ const {data:it}=await db.from('venta_items').select('venta_id,cantidad').in('venta_id',ids); items=it||[]; }
@@ -1067,7 +1086,7 @@ function verVenta(id){
     <div class="totline big"><span>Total</span><span>${money(v.total)}</span></div>
     ${ES_ADMIN?`<div class="totline"><span class="muted">Ganancia</span><span class="gain">${money(v.ganancia)}</span></div>`:''}
     ${(()=>{
-      if(ADMIN_NAMES.includes(v.vendedor)) return '';
+      if(sinComAsesor(v.vendedor)) return '';
       const u=its.reduce((s,i)=>s+i.cantidad,0);
       const comCalc=u*tarifaCom(v);
       const comActual=v.comision_ajustada!=null?+v.comision_ajustada:comCalc;
@@ -1151,6 +1170,222 @@ async function guardarDevolucion(ventaId){
   toast('✓ Devolución registrada'+(repuso?' · stock repuesto':''));
   closeModal();
   renderReportes();
+}
+
+// ════════════ VENDEDORES — programa de revendedores ════════════
+// Los datos viven en tablas rev_* (RLS activado) y se leen con funciones que piden el PIN.
+// Flujo: el vendedor sube el pedido en su portal → aquí se revisa el pago → "Aprobar" lo registra
+// como venta normal (dropshipping o contra entrega, sin stock de tienda) y entra a Envíos/CRM.
+const PORTAL_URL = 'https://athleticastudiofit-star.github.io/polos593-catalogo/vendedores/';
+const CATALOGO_URL = 'https://athleticastudiofit-star.github.io/polos593-catalogo/';
+const staffPin = () => ES_ADMIN ? (CONFIG.pin_admin||'5930') : (CONFIG.pin||'0593');
+let REV = null, REV_VISTA = 'revisar';
+async function revRpc(fn, args){
+  const { data, error } = await db.rpc(fn, args);
+  if(error) throw error;
+  return data;
+}
+function revError(e){
+  const m = (e && e.message) || String(e);
+  if(/Could not find the function|schema cache|does not exist/i.test(m)) return 'Falta activar el programa en Supabase (correr schema-v4-vendedores.sql)';
+  const map = { PIN_INVALIDO:'PIN sin permiso para esto', PEDIDO_YA_REVISADO:'Este pedido ya fue revisado', VENTA_YA_ASIGNADA:'Esa venta ya tiene vendedor',
+    VENDEDOR_NO_ACTIVO:'El vendedor no está activo', NADA_POR_PAGAR:'No hay nada por pagar', SIN_PRENDAS_CON_COMISION:'La venta no tiene prendas con comisión' };
+  const k = Object.keys(map).find(c=>m.includes(c));
+  return k ? map[k] : m;
+}
+const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function revBadge(){
+  const b=document.getElementById('nav-vend'); if(!b) return;
+  try{
+    const r = await revRpc('rev_admin_resumen',{p_pin:staffPin()});
+    const n = (r.pedidos||[]).filter(p=>p.estado==='recibido').length;
+    b.textContent=n; b.style.display=n?'':'none';
+  }catch(e){ b.style.display='none'; }
+}
+async function revCargarReferidos(){
+  const w=document.getElementById('ref-wrap'), s=document.getElementById('c-ref'); if(!w||!s) return;
+  try{
+    const lista = await revRpc('rev_admin_lista',{p_pin:staffPin()});
+    if(!lista.length) return;
+    s.innerHTML = '<option value="">No, venta directa</option>' + lista.map(v=>`<option value="${v.id}">${escH(v.codigo)} · ${escH(v.nombre)}</option>`).join('');
+    w.style.display='';
+  }catch(e){ /* programa aún no activado: no se muestra */ }
+}
+function revVista(v){ REV_VISTA=v; pintarVendedores(); }
+async function renderVendedores(){
+  const view=document.getElementById('view');
+  view.innerHTML='<div class="empty">Cargando vendedores…</div>';
+  try{ REV = await revRpc('rev_admin_resumen',{p_pin:staffPin()}); }
+  catch(e){ view.innerHTML=`<h2 class="page">Vendedores</h2><div class="card"><b>No se pudo cargar</b><div class="muted" style="margin-top:.4rem">${escH(revError(e))}</div></div>`; return; }
+  pintarVendedores();
+  const n=REV.pedidos.filter(p=>p.estado==='recibido').length, b=document.getElementById('nav-vend');
+  if(b){ b.textContent=n; b.style.display=n?'':'none'; }
+}
+const REV_ENVIO = { recibido:'🕓 Por revisar', por_despachar:'📝 Por despachar', en_camino:'🚚 En camino', entregado:'✅ Entregado', depositado:'✅ Entregado', rechazado:'↩️ Rechazado', anulado:'✖ Anulado' };
+const REV_COM = { ganada:'ganada', pagada:'pagada', en_camino:'al cobrar', por_revisar:'al aprobar', rechazado:'—', anulado:'—', kit:'kit' };
+function pintarVendedores(){
+  const view=document.getElementById('view'); if(!REV) return;
+  const porRev = REV.pedidos.filter(p=>p.estado==='recibido');
+  const aPagar = REV.vendedores.filter(v=>+v.saldo.por_cobrar>0);
+  const totalLunes = aPagar.reduce((s,v)=>s+(+v.saldo.por_cobrar),0);
+  const chip=(k,l)=>`<button onclick="revVista('${k}')" style="padding:.4rem .8rem;border-radius:20px;border:1px solid ${REV_VISTA===k?'var(--gold)':'var(--border)'};background:${REV_VISTA===k?'var(--gold)':'var(--surface2)'};color:${REV_VISTA===k?'#000':'var(--text)'};font-size:12px">${l}</button>`;
+  let body='';
+  if(REV_VISTA==='revisar'){
+    body = porRev.length ? porRev.map(revCardRevisar).join('') : '<div class="empty">No hay pedidos por revisar 🎉</div>';
+  } else if(REV_VISTA==='pedidos'){
+    const otros = REV.pedidos.filter(p=>p.estado!=='recibido');
+    body = otros.length ? `<div class="card" style="padding:.4rem .8rem">${otros.map(p=>`
+      <div class="prod-pick" style="align-items:flex-start">
+        <div style="flex:1;min-width:0"><b>${p.tipo==='kit'?'🎁 Kit':'#'+p.id} · ${escH(p.vendedor.nombre)}</b>
+          <small style="display:block">${new Date(p.created_at).toLocaleDateString('es-EC',{day:'numeric',month:'short'})} · ${escH(p.cliente_nombre||'')} · ${p.prendas} prenda(s) · ${p.metodo_pago==='contraentrega'?'COD':'transf.'}${p.modalidad==='equipo'?' · cerró el equipo':''}${p.venta_folio?' · venta #'+p.venta_folio:''}</small>
+          ${p.motivo_rechazo?`<small style="display:block;color:var(--red)">${escH(p.motivo_rechazo)}</small>`:''}</div>
+        <div style="text-align:right;white-space:nowrap"><div style="font-size:12px">${REV_ENVIO[p.envio_estado]||p.envio_estado}</div>
+          <small>${p.tipo==='kit'?money(p.total):money(p.com_monto||p.comision)+' '+(REV_COM[p.com_estado]||'')}</small></div>
+      </div>`).join('')}</div>` : '<div class="empty">Todavía no hay pedidos</div>';
+  } else if(REV_VISTA==='equipo'){
+    body = REV.vendedores.length ? REV.vendedores.map(revCardVendedor).join('') : `<div class="empty">Aún no hay vendedores.<br>Comparte el portal: <b>${PORTAL_URL}</b></div>`;
+  } else if(REV_VISTA==='pagos' && REV.es_admin){
+    body = `<div class="kpis"><div class="kpi"><div class="l">💸 A pagar este lunes</div><div class="v" style="color:var(--gold)">${money(totalLunes)}</div><div class="muted" style="font-size:11px">${aPagar.length} vendedor(es)</div></div>
+      <div class="kpi"><div class="l">🚚 Comisión por confirmar</div><div class="v">${money(REV.vendedores.reduce((s,v)=>s+(+v.saldo.en_camino),0))}</div><div class="muted" style="font-size:11px">contra entrega en camino</div></div></div>
+      ${aPagar.length ? aPagar.map(v=>`<div class="card">
+        <div class="row" style="justify-content:space-between"><b>${escH(v.nombre)} <span class="muted" style="font-weight:400">· ${escH(v.codigo)}</span></b><b style="color:var(--gold);font-size:18px">${money(v.saldo.por_cobrar)}</b></div>
+        <div class="muted" style="font-size:12px;margin-top:.2rem">Comisiones ${money(v.saldo.comision_ganada)}${+v.saldo.bono_pendiente>0?' · Bono '+money(v.saldo.bono_pendiente)+' ('+v.saldo.bono_pendiente_meses.join(', ')+')':''}</div>
+        <div style="font-size:13px;margin-top:.4rem">${v.numero_cuenta?`🏦 ${escH(v.banco||'')} · ${escH(v.tipo_cuenta||'')} <b>${escH(v.numero_cuenta)}</b><br>👤 ${escH(v.titular||v.nombre)}${v.cedula?' · CI '+escH(v.cedula):''}`:'<span style="color:var(--yellow)">⚠️ Sin cuenta bancaria registrada</span>'}</div>
+        <button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="revPagar('${v.id}')">💸 Ya le transferí ${money(v.saldo.por_cobrar)}</button></div>`).join('') : '<div class="empty">No hay comisiones por pagar</div>'}`;
+  } else if(REV_VISTA==='ajustes' && REV.es_admin){
+    body = `<div class="card"><b>Cuenta donde pagan los clientes</b>
+        <div class="muted" style="font-size:12px;margin:.3rem 0 .6rem">La ven los vendedores en su portal para pasársela al cliente.</div>
+        <textarea class="fld" id="rev-cuenta" rows="4" placeholder="Banco Pichincha · Ahorros 22XXXXXXXX&#10;Titular: …&#10;Cédula/RUC: …" style="resize:vertical">${escH(REV.cuenta_pago)}</textarea>
+        <button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="revGuardarCuenta()">Guardar cuenta</button></div>
+      <div class="card"><b>Portal de vendedores</b>
+        <div class="muted" style="font-size:12px;margin:.3rem 0 .6rem">Aquí se registran, suben pedidos y ven sus comisiones.</div>
+        <div style="word-break:break-all;color:var(--gold)">${PORTAL_URL}</div>
+        <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="navigator.clipboard.writeText(PORTAL_URL).then(()=>toast('Link copiado'))">Copiar link</button></div>`;
+  }
+  view.innerHTML = `
+    <h2 class="page">Vendedores <span class="muted" style="font-size:13px">· programa de reventa</span></h2>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem">
+      ${chip('revisar','Por revisar ('+porRev.length+')')}${chip('pedidos','Pedidos')}${chip('equipo','Equipo ('+REV.vendedores.length+')')}
+      ${REV.es_admin?chip('pagos','Pagos del lunes'+(aPagar.length?' ('+aPagar.length+')':'')):''}${REV.es_admin?chip('ajustes','Ajustes'):''}
+    </div>${body}`;
+}
+function revCardRevisar(p){
+  const v=p.vendedor, kit=p.tipo==='kit';
+  return `<div class="card env-card st-por_despachar">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${kit?'🎁 KIT DE INICIO':'Pedido #'+p.id}</b> <span class="muted" style="font-size:12px">· ${new Date(p.created_at).toLocaleString('es-EC',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span></div>
+      <span class="badge ${p.metodo_pago==='contraentrega'?'b-cod':'b-drop'}">${p.metodo_pago==='contraentrega'?'CONTRA ENTREGA':'TRANSFERENCIA'}</span>
+    </div>
+    <div style="font-size:13px;margin-top:.3rem">🤝 Vendedor: <b>${escH(v.nombre)}</b> (${escH(v.codigo)}) · <a style="color:var(--gold)" href="https://wa.me/593${String(v.telefono||'').replace(/^0/,'')}" target="_blank" rel="noopener">WhatsApp</a></div>
+    <div style="font-size:13px;margin-top:.3rem">🧍 ${escH(p.cliente_nombre)} · 📞 ${escH(p.cliente_telefono||'—')}</div>
+    <div style="font-size:13px">📍 ${escH(p.ciudad)} · 🏠 ${escH(p.direccion)}</div>
+    <div class="muted" style="font-size:12px;margin-top:.3rem">${(p.items||[]).map(i=>`${i.cantidad}x ${escH(i.nombre)} · ${escH(i.color)} · ${escH(i.talla)}`).join('<br>')}</div>
+    ${p.nota?`<div style="font-size:12px;margin-top:.3rem">📝 ${escH(p.nota)}</div>`:''}
+    <div class="totline" style="margin-top:.4rem"><span>${kit?'💰 Paga el vendedor (envío incluido)':p.metodo_pago==='contraentrega'?'💰 Cobra Pardux al entregar':'💰 Pagó el cliente'}</span><b>${money(p.total)}</b></div>
+    ${kit?'':`<div class="totline"><span class="muted">Comisión del vendedor</span><span style="color:var(--gold)">${money(p.comision)}</span></div>`}
+    ${p.tiene_comprobante?`<button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="revComprobante(${p.id})">🧾 Ver comprobante de pago</button>`:''}
+    <div class="grid2" style="margin-top:.5rem">
+      <button class="btn btn-green" onclick="revAprobar(${p.id})">✅ ${p.metodo_pago==='transferencia'?'Pago recibido · aprobar':'Aprobar'}</button>
+      <button class="btn btn-red" onclick="revRechazar(${p.id})">✖ Rechazar</button>
+    </div></div>`;
+}
+function revCardVendedor(v){
+  const est = {activo:['b-local','ACTIVO'], pendiente_kit:['b-cod','SIN KIT'], pausado:['b-drop','PAUSADO']}[v.estado]||['b-cod',v.estado];
+  const mes = (v.saldo.meses||[]).find(m=>m.mes===v.saldo.mes_actual)||{prendas:0,comision:0};
+  return `<div class="card">
+    <div class="row" style="justify-content:space-between"><b>${escH(v.nombre)}</b><span class="badge ${est[0]}">${est[1]}</span></div>
+    <div class="muted" style="font-size:12px">Código <b style="color:var(--gold)">${escH(v.codigo)}</b> · ${escH(v.telefono)}${v.ciudad?' · '+escH(v.ciudad):''} · desde ${new Date(v.desde).toLocaleDateString('es-EC',{day:'numeric',month:'short'})}</div>
+    <div class="grid2" style="margin-top:.6rem;font-size:13px">
+      <div>Este mes: <b>${mes.prendas}</b> prendas · ${money(mes.comision)}</div>
+      <div style="text-align:right">Por pagar: <b style="color:var(--gold)">${money(v.saldo.por_cobrar)}</b></div>
+    </div>
+    <div class="muted" style="font-size:11px;margin-top:.3rem;word-break:break-all">${CATALOGO_URL}?ref=${escH(v.codigo)}</div>
+    ${REV.es_admin?`<div class="grid2" style="margin-top:.6rem">
+      ${v.estado==='pausado'?`<button class="btn btn-ghost" onclick="revEstado('${v.id}','activo')">▶️ Reactivar</button>`
+        :v.estado==='pendiente_kit'?`<button class="btn btn-ghost" onclick="revEstado('${v.id}','activo')" title="Activar sin kit">✓ Activar sin kit</button>`
+        :`<button class="btn btn-ghost" onclick="revEstado('${v.id}','pausado')">⏸ Pausar</button>`}
+      <button class="btn btn-ghost" onclick="revNuevoPin('${v.id}')">🔑 Nuevo PIN</button></div>`:''}
+  </div>`;
+}
+async function revComprobante(id){
+  showModal('<div class="empty">Cargando comprobante…</div>');
+  try{
+    const src = await revRpc('rev_admin_comprobante',{p_pin:staffPin(), p_id:id});
+    showModal(`<b>Comprobante · pedido #${id}</b><img src="${src}" alt="Comprobante" style="width:100%;border-radius:10px;margin-top:.7rem">
+      <button class="btn btn-ghost" style="width:100%;margin-top:.7rem" onclick="closeModal()">Cerrar</button>`);
+  }catch(e){ showModal(`<b>No se pudo cargar</b><div class="muted">${escH(revError(e))}</div>`); }
+}
+async function revRechazar(id){
+  const motivo = prompt('¿Por qué se rechaza? (lo ve el vendedor)\nEj: No llegó la transferencia / Talla agotada');
+  if(motivo===null) return;
+  try{ await revRpc('rev_admin_rechazar',{p_pin:staffPin(), p_id:id, p_motivo:motivo, p_quien:VENDEDOR}); toast('Pedido rechazado'); renderVendedores(); }
+  catch(e){ toast(revError(e)); }
+}
+// Aprobar = registrar la venta como cualquier otra (Envíos/CRM/Reportes) y vincularla al pedido
+async function revAprobar(id){
+  const p = REV.pedidos.find(x=>x.id===id); if(!p) return;
+  const kit = p.tipo==='kit', esCOD = p.metodo_pago==='contraentrega';
+  if(!confirm(kit ? `¿Ya llegó la transferencia de ${money(p.total)} de ${p.vendedor.nombre}?\nSe registra la venta del kit y se activa su cuenta.`
+          : esCOD ? `¿Aprobar el pedido #${id} contra entrega por ${money(p.total)}?\nPasa a Envíos para despacharlo por Pardux.`
+          : `¿Ya llegó la transferencia de ${money(p.total)} del cliente ${p.cliente_nombre}?`)) return;
+  if(!productosCache.length) await loadProductos();
+  const items = (p.items||[]).map(i=>{ const pr=productosCache.find(x=>x.sku===i.sku)||{};
+    return { sku:i.sku, nombre:i.nombre, talla:i.talla, color:i.color, cantidad:+i.cantidad, precio_unit:+i.precio, costo_unit:+(pr.costo||0) }; });
+  const subtotal = items.reduce((s,i)=>s+i.precio_unit*i.cantidad,0);
+  const costo = items.reduce((s,i)=>s+i.costo_unit*i.cantidad,0);
+  const zona = esCOD ? 'pardux' : (/guayaquil/i.test(p.ciudad||'') ? 'guayaquil' : 'provincia');
+  const envioCobrado = +p.envio||0;
+  const costoEnvio = esCOD ? envioCobrado : ENVIO[zona];        // Pardux: el costo real se carga con la guía
+  const total = +p.total;
+  const desc = Math.round((subtotal + envioCobrado - total)*100)/100;  // el kit va con descuento (precio menos comisión)
+  const venta = {
+    tipo: esCOD?'contraentrega':'dropshipping', vendedor: (kit?'Kit · ':'Vend · ')+p.vendedor.nombre,
+    cliente_nombre:p.cliente_nombre, cliente_telefono:p.cliente_telefono, cedula:p.cliente_cedula||null,
+    ciudad:p.ciudad, zona_envio:zona, costo_envio:costoEnvio, envio_cobrado:envioCobrado,
+    descuento_tipo: desc?'monto_final':null, descuento_valor: desc?total:0, descuento_monto:desc,
+    subtotal, total, costo_productos:costo, ganancia: Math.round((total-costo-costoEnvio)*100)/100,
+    metodo_pago: esCOD?'Contra entrega':'Transferencia', notas:p.direccion
+  };
+  if(esCOD){ venta.estado_envio='por_despachar'; venta.estado_envio_at=new Date().toISOString(); }
+  const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();
+  if(error){ toast('Error: '+error.message); return; }
+  const { error:e2 } = await db.from('venta_items').insert(items.map(i=>({venta_id:vRow.id, sku:i.sku, nombre:i.nombre, talla:i.talla, cantidad:i.cantidad, precio_unit:i.precio_unit, costo_unit:i.costo_unit, es_local:false})));
+  try{
+    if(e2) throw e2;
+    await revRpc('rev_admin_aprobar',{p_pin:staffPin(), p_id:id, p_venta_id:vRow.id, p_quien:VENDEDOR});
+  }catch(e){
+    await db.from('ventas').delete().eq('id',vRow.id);   // sin vínculo no queda una venta suelta
+    toast('No se aprobó: '+revError(e)); renderVendedores(); return;
+  }
+  venta.direccion = p.direccion;
+  await sincronizarCRM(venta, items, vRow.folio);
+  if(esCOD) actualizarBadgeEnvios();
+  revBadge();
+  mostrarCompartir(vRow.folio, venta, items);
+}
+async function revPagar(vid){
+  const v = REV.vendedores.find(x=>x.id===vid); if(!v) return;
+  const ref = prompt(`Pago a ${v.nombre}: ${money(v.saldo.por_cobrar)}\n\nN° de la transferencia (opcional):`);
+  if(ref===null) return;
+  try{
+    const r = await revRpc('rev_admin_liquidar',{p_pin:staffPin(), p_vendedor:vid, p_referencia:ref, p_quien:VENDEDOR});
+    toast(`✓ Pago de ${money(r.total)} registrado`); renderVendedores();
+  }catch(e){ toast(revError(e)); }
+}
+async function revEstado(vid, estado){
+  if(estado==='pausado' && !confirm('¿Pausar a este vendedor? No podrá entrar ni subir pedidos.')) return;
+  try{ await revRpc('rev_admin_vendedor',{p_pin:staffPin(), p_id:vid, p_estado:estado, p_pin_nuevo:null}); toast('✓ Actualizado'); renderVendedores(); }
+  catch(e){ toast(revError(e)); }
+}
+async function revNuevoPin(vid){
+  const pin = prompt('Nuevo PIN para el vendedor (4 a 6 números). Se lo pasas por WhatsApp:');
+  if(!pin) return;
+  try{ await revRpc('rev_admin_vendedor',{p_pin:staffPin(), p_id:vid, p_estado:null, p_pin_nuevo:pin.trim()}); toast('✓ PIN cambiado'); }
+  catch(e){ toast(revError(e)); }
+}
+async function revGuardarCuenta(){
+  try{ await revRpc('rev_admin_cuenta_pago',{p_pin:staffPin(), p_texto:document.getElementById('rev-cuenta').value}); toast('✓ Cuenta guardada'); renderVendedores(); }
+  catch(e){ toast(revError(e)); }
 }
 
 // ── init ──

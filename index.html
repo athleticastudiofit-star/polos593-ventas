@@ -276,11 +276,14 @@ async function renderVender(){
   v.innerHTML = `
     <div id="cod-banner"></div>
     <div class="seg" style="margin-bottom:1rem">
-      <button class="${MODO==='venta'?'on':''}" onclick="setModo('venta')">🧾 Venta</button>
-      <button class="${MODO==='stock'?'on':''}" onclick="setModo('stock')">📥 Pedido para stock</button>
+      <button class="${MODO==='venta'?'on':''}" onclick="setModo('venta')">🧾 Venta a un cliente<br><small style="font-weight:400;font-size:11px">local · dropshipping · contra entrega</small></button>
+      <button class="${MODO==='stock'?'on':''}" onclick="setModo('stock')">📥 Reponer la tienda<br><small style="font-weight:400;font-size:11px">sin cliente · llega al local</small></button>
     </div>
-    <h2 class="page">${MODO==='stock'?'Pedido a la proveedora para la tienda':'Nueva venta'}</h2>
-    ${MODO==='stock'?'<div class="muted" style="font-size:12px;margin:-.6rem 0 1rem">No es una venta: las prendas se suman al inventario de la tienda cuando llegan, y se le pagan a la proveedora con la semana.</div>':''}
+    <h2 class="page">${MODO==='stock'?'Reponer la tienda':'Nueva venta'}</h2>
+    ${MODO==='stock'?`<div class="card" style="border-left:3px solid var(--yellow);margin-top:-.4rem">
+      <b>⚠️ Esto NO es una venta.</b> Es para pedir prendas a la proveedora que llegan a la tienda, sin cliente.
+      <div class="muted" style="font-size:12px;margin-top:.3rem">¿Es para un cliente que paga y se le envía? Eso es una venta <b>dropshipping</b>.</div>
+      <button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="irADropshipping()">🧾 Ir a Venta → Dropshipping</button></div>`:''}
     <div class="card">
       <div id="wizard"></div>
     </div>
@@ -349,6 +352,7 @@ async function renderVender(){
   v.insertAdjacentHTML('beforeend', '<div class="card" id="stock-checkout" style="display:none"></div><div id="stock-lista"></div>');
   SEL={genero:null,prenda:null,color:null};
   renderWizard();
+  if(MODO==='venta') setTipo(TIPO);
   renderCart();
   pintarBannerCOD();
   if(MODO==='stock') renderStockLista();
@@ -1190,7 +1194,8 @@ async function guardarDevolucion(ventaId){
 // No es venta: no suma ingresos ni comisión. Se paga a la proveedora con la semana (prendas + envío
 // desde Guayaquil) y las prendas entran al stock de la tienda cuando llegan ("Llegó a la tienda").
 let MODO='venta', STOCK_ENVIO=ENVIO.provincia;
-function setModo(m){ if(m===MODO) return; MODO=m; cart=[]; renderVender(); }
+function setModo(m){ if(m===MODO) return; MODO=m; cart=[]; return renderVender(); }
+async function irADropshipping(){ await setModo('venta'); setTipo('dropshipping'); }
 const lunesDe = d => { const x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; };
 const fechaCorta = d => new Date(d).toLocaleDateString('es-EC',{day:'numeric',month:'short'});
 function stockTotales(){

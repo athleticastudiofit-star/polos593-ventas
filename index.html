@@ -652,7 +652,9 @@ const ENV_ACTIVOS=['por_despachar','en_camino','entregado'];
 async function actualizarBadgeEnvios(){
   const b=document.getElementById('nav-envios'); if(!b) return;
   const { data, error } = await db.from('ventas').select('id').eq('tipo','contraentrega').in('estado_envio',['por_despachar','en_camino']);
-  const n = error ? 0 : (data||[]).length;
+  let n = error ? 0 : (data||[]).length;
+  const r2 = await db.from('cambios').select('id').eq('estado','pendiente');
+  if(!r2.error) n += (r2.data||[]).length;
   b.textContent = n; b.style.display = n>0 ? '' : 'none';
 }
 function envFiltro(f){ ENV_FILTRO=f; renderEnvios(); }
@@ -670,6 +672,7 @@ async function pintarBannerCOD(){
 }
 async function renderEnvios(){
   const v=document.getElementById('view');
+  if(ENV_VISTA==='cambios'){ v.innerHTML=envTabsHTML()+'<div class="empty">Cargando cambios…</div>'; return renderCambios(); }
   v.innerHTML='<div class="empty">Cargando envíos…</div>';
   const { data, error } = await db.from('ventas').select('*').eq('tipo','contraentrega').order('fecha',{ascending:false}).limit(300);
   if(error){ v.innerHTML=`<div class="card"><b>No se pudo cargar Envíos</b><div class="muted" style="margin-top:.4rem">${error.message}</div></div>`; return; }
@@ -690,6 +693,7 @@ async function renderEnvios(){
   const chip=(f,l)=>`<button onclick="envFiltro('${f}')" style="padding:.4rem .8rem;border-radius:20px;border:1px solid ${ENV_FILTRO===f?'var(--gold)':'var(--border)'};background:${ENV_FILTRO===f?'var(--gold)':'var(--surface2)'};color:${ENV_FILTRO===f?'#000':'var(--text)'};font-size:12px">${l}</button>`;
   const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
   v.innerHTML = `
+    ${envTabsHTML()}
     <h2 class="page">Envíos contra entrega <span class="muted" style="font-size:13px">· Pardux</span></h2>
     <div class="kpis">
       <div class="kpi"><div class="l">💰 Por cobrar</div><div class="v" style="color:var(--yellow)">${money(suma(pd)+suma(ec))}</div><div class="muted" style="font-size:11px">${pd.length+ec.length} pedido(s) · ${ec.length} en camino</div></div>
@@ -1116,7 +1120,8 @@ function verVenta(id){
         </div>`;
     })()}
     <div class="muted" style="font-size:12px;margin-top:.5rem">💳 ${v.metodo_pago||''}</div>
-    ${ES_ADMIN?`<button class="btn btn-ghost" style="width:100%;margin-top:1rem;padding:.7rem" onclick="abrirDevolucion('${id}')">↩️ Registrar devolución</button>`:''}
+    <button class="btn btn-ghost" style="width:100%;margin-top:1rem;padding:.7rem" onclick="abrirCambio(${v.folio})">🔁 Registrar cambio de prenda</button>
+    ${ES_ADMIN?`<button class="btn btn-ghost" style="width:100%;margin-top:.5rem;padding:.7rem" onclick="abrirDevolucion('${id}')">↩️ Registrar devolución</button>`:''}
     ${ES_ADMIN?`<button class="btn btn-red" style="width:100%;margin-top:.6rem;padding:.7rem" onclick="eliminarVenta('${id}')">🗑 Eliminar venta</button>`:''}`;
   showModal(html);
 }
@@ -1188,6 +1193,234 @@ async function guardarDevolucion(ventaId){
   toast('✓ Devolución registrada'+(repuso?' · stock repuesto':''));
   closeModal();
   renderReportes();
+}
+
+// ════════════ CAMBIOS DE PRENDA ════════════
+// El cliente devuelve UNA prenda y recibe otra (talla, color o defecto). Se registra desde
+// Envíos → 🔁 Cambios (o desde el detalle de la venta). Guarda: qué salió y qué entró, la
+// diferencia de precio (y si ya se cobró/devolvió), quién paga el envío y cuánto nos costó,
+// la guía y el estado: pendiente → enviado → completado.
+let ENV_VISTA='cod', CB_FILTRO='abiertos', CB_VENTA=null, CB_CACHE=[];
+const CB_MOTIVOS={talla:'Talla', color:'Color', defecto:'Defecto', otro:'Otro'};
+const CB_EST={pendiente:['📝 Por enviar','b-cod'], enviado:['🚚 Enviado','b-local'], completado:['✅ Completado','b-local'], anulado:['✖ Anulado','b-drop']};
+const cbEsc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function envVista(v){ ENV_VISTA=v; renderEnvios(); }
+function envTabsHTML(){
+  const b=(k,l)=>`<button class="${ENV_VISTA===k?'on':''}" onclick="envVista('${k}')">${l}</button>`;
+  return `<div class="seg" style="margin-bottom:1rem">${b('cod','🚚 Contra entrega')}${b('cambios','🔁 Cambios')}</div>`;
+}
+// ── selector de prenda: género → prenda → color → talla (desde el inventario) ──
+function pkHTML(px){
+  return `<div class="grid2" style="margin-bottom:.4rem">
+    <select class="fld" id="${px}-gen" onchange="pkUpd('${px}',0)"><option value="">Género…</option><option value="mujer">Mujer</option><option value="hombre">Hombre</option></select>
+    <select class="fld" id="${px}-tipo" onchange="pkUpd('${px}',1)"><option value="">Prenda…</option></select>
+    <select class="fld" id="${px}-color" onchange="pkUpd('${px}',2)"><option value="">Color…</option></select>
+    <select class="fld" id="${px}-sku" onchange="cbCalc()"><option value="">Talla…</option></select></div>`;
+}
+function pkUpd(px, nivel){
+  const g=document.getElementById(px+'-gen').value, ti=document.getElementById(px+'-tipo'), co=document.getElementById(px+'-color'), sk=document.getElementById(px+'-sku');
+  const base=productosCache.filter(p=>(p.genero===g||p.genero==='unisex') && +p.precio_venta>0);
+  if(nivel<1){ const tipos=[...new Set(base.map(p=>p.tipo))]; ti.innerHTML='<option value="">Prenda…</option>'+tipos.map(t=>`<option value="${t}">${cbEsc(prendaLabel(t))}</option>`).join(''); }
+  if(nivel<2){ const cols=[...new Set(base.filter(p=>p.tipo===ti.value).map(p=>p.color))].sort(); co.innerHTML='<option value="">Color…</option>'+cols.map(c=>`<option>${cbEsc(c)}</option>`).join(''); }
+  const tallas=base.filter(p=>p.tipo===ti.value && p.color===co.value).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
+  sk.innerHTML='<option value="">Talla…</option>'+tallas.map(p=>`<option value="${p.sku}">${p.talla}${px==='cb-e'?' · stock '+p.stock:''}</option>`).join('');
+  cbCalc();
+}
+const pkProd = px => productosCache.find(p=>p.sku===(document.getElementById(px+'-sku')||{}).value) || null;
+// prenda que devuelve: de la venta original (si se encontró) o elegida a mano
+function cbSale(){
+  const sel=document.getElementById('cb-sale-item');
+  if(sel && sel.value!=='otra' && CB_VENTA){ const it=CB_VENTA.items[+sel.value]; if(it) return {sku:it.sku, nombre:it.nombre, color:it.color, talla:it.talla, precio:+it.precio_unit}; }
+  const p=pkProd('cb-s'); return p ? {sku:p.sku, nombre:p.nombre, color:p.color, talla:p.talla, precio:+p.precio_venta} : null;
+}
+async function abrirCambio(folio){
+  if(!productosCache.length) await loadProductos();
+  CB_VENTA=null;
+  showModal(`<b style="font-size:16px">🔁 Nuevo cambio de prenda</b>
+    <label class="lbl" style="margin-top:.8rem">N° de la venta original (opcional)</label>
+    <div class="row"><input class="fld" id="cb-folio" type="number" placeholder="Ej: 72" value="${folio||''}"><button class="btn btn-ghost" onclick="cbBuscarVenta()">Buscar</button></div>
+    <div id="cb-venta-info" class="muted" style="font-size:12px;margin-top:.3rem"></div>
+    <label class="lbl" style="margin-top:.7rem">Cliente</label>
+    <div class="grid2"><input class="fld" id="cb-nombre" placeholder="Nombre"><input class="fld" id="cb-tel" placeholder="Teléfono 09…"></div>
+    <div class="grid2" style="margin-top:.5rem"><input class="fld" id="cb-ciudad" placeholder="Ciudad"><input class="fld" id="cb-dir" placeholder="Dirección de envío"></div>
+    <label class="lbl" style="margin-top:.7rem">¿Por qué la cambia?</label>
+    <div class="seg" id="cb-motivo">${Object.entries(CB_MOTIVOS).map(([k,l],i)=>`<button class="${i===0?'on':''}" data-m="${k}" onclick="cbSeg('cb-motivo',this)">${l}</button>`).join('')}</div>
+    <label class="lbl" style="margin-top:.8rem">↩️ Prenda que devuelve</label>
+    <div id="cb-sale-wrap"></div><div id="cb-sale-pk">${pkHTML('cb-s')}</div>
+    <label class="lbl" style="margin-top:.6rem">➡️ Prenda nueva que se le envía</label>
+    ${pkHTML('cb-e')}
+    <div class="seg" id="cb-origen" style="margin-top:.2rem"><button class="on" data-m="proveedora" onclick="cbSeg('cb-origen',this)">📦 Sale de la proveedora</button><button data-m="tienda" onclick="cbSeg('cb-origen',this)">🏬 Sale de la tienda</button></div>
+    <label class="lbl" style="margin-top:.8rem">¿Quién paga el envío?</label>
+    <div class="seg" id="cb-envio"><button class="on" data-m="cliente" onclick="cbSeg('cb-envio',this)">Cliente paga</button><button data-m="nosotros" onclick="cbSeg('cb-envio',this)">Lo asumimos</button></div>
+    <div class="grid2" style="margin-top:.5rem">
+      <div><label class="lbl">Cobrado al cliente $</label><input class="fld" id="cb-cobrado" type="number" step="0.5" value="5" oninput="cbCalc()"></div>
+      <div><label class="lbl">Nos cuesta (ida y vuelta) $</label><input class="fld" id="cb-costo" type="number" step="0.5" placeholder="Se puede poner después" oninput="cbCalc()"></div>
+    </div>
+    <label class="lbl" style="margin-top:.6rem">Nota (opcional)</label>
+    <input class="fld" id="cb-nota" placeholder="Ej: le quedó grande, pidió M">
+    <div id="cb-resumen" class="card" style="margin-top:.8rem;background:var(--surface2)"></div>
+    <div class="grid2"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-green" id="cb-guardar" onclick="guardarCambio()">🔁 Registrar cambio</button></div>`);
+  if(folio) cbBuscarVenta(); else cbCalc();
+}
+function cbSeg(id, btn){ document.querySelectorAll('#'+id+' button').forEach(b=>b.classList.toggle('on',b===btn)); if(id==='cb-envio'){ const c=document.getElementById('cb-cobrado'); if(btn.dataset.m==='nosotros') c.value=0; else if(!(+c.value)) c.value=5; } cbCalc(); }
+const cbSegVal = id => (document.querySelector('#'+id+' button.on')||{}).dataset?.m;
+async function cbBuscarVenta(){
+  const f=+document.getElementById('cb-folio').value, info=document.getElementById('cb-venta-info');
+  CB_VENTA=null; document.getElementById('cb-sale-wrap').innerHTML=''; document.getElementById('cb-sale-pk').style.display='';
+  if(!f){ info.textContent=''; cbCalc(); return; }
+  const { data:v } = await db.from('ventas').select('*').eq('folio',f).maybeSingle();
+  if(!v){ info.innerHTML='<span style="color:var(--red)">No encontré esa venta. Puedes llenar los datos a mano.</span>'; cbCalc(); return; }
+  const { data:its } = await db.from('venta_items').select('*').eq('venta_id',v.id);
+  const items=(its||[]).map(i=>({...i, color:(productosCache.find(p=>p.sku===i.sku)||{}).color||''}));
+  CB_VENTA={...v, items};
+  info.innerHTML=`✓ Venta #${v.folio} · ${new Date(v.fecha).toLocaleDateString('es-EC',{day:'numeric',month:'short'})} · ${cbEsc(v.vendedor||'')} · ${money(v.total)}`;
+  const set=(id,val)=>{ const e=document.getElementById(id); if(e && !e.value && val) e.value=val; };
+  set('cb-nombre',v.cliente_nombre); set('cb-tel',v.cliente_telefono); set('cb-ciudad',v.ciudad); set('cb-dir',v.notas);
+  if(items.length){
+    document.getElementById('cb-sale-wrap').innerHTML=`<select class="fld" id="cb-sale-item" style="margin-bottom:.4rem" onchange="document.getElementById('cb-sale-pk').style.display=this.value==='otra'?'':'none';cbCalc()">
+      ${items.map((i,n)=>`<option value="${n}">${cbEsc(prendaLabel((productosCache.find(p=>p.sku===i.sku)||{}).tipo)||i.nombre)} · ${cbEsc(i.color)} · ${cbEsc(i.talla)} · ${money(i.precio_unit)}</option>`).join('')}
+      <option value="otra">Otra prenda (elegir abajo)</option></select>`;
+    document.getElementById('cb-sale-pk').style.display='none';
+  }
+  cbCalc();
+}
+function cbCalc(){
+  const el=document.getElementById('cb-resumen'); if(!el) return null;
+  const s=cbSale(), e=pkProd('cb-e');
+  const dif = (s && e) ? Math.round((+e.precio_venta - s.precio)*100)/100 : 0;
+  const paga=cbSegVal('cb-envio'), cobrado=paga==='cliente' ? Math.max(0,+document.getElementById('cb-cobrado').value||0) : 0;
+  const costo=Math.max(0,+document.getElementById('cb-costo').value||0);
+  const cobrar=Math.max(dif,0)+cobrado, devolver=Math.max(-dif,0);
+  el.innerHTML = `
+    <div class="totline"><span class="muted">Devuelve</span><span>${s?cbEsc(s.color)+' '+cbEsc(s.talla)+' · '+money(s.precio):'—'}</span></div>
+    <div class="totline"><span class="muted">Recibe</span><span>${e?cbEsc(e.color)+' '+cbEsc(e.talla)+' · '+money(e.precio_venta):'—'}</span></div>
+    <div class="totline"><span class="muted">Diferencia de precio</span><span>${dif>0?'cliente paga '+money(dif):dif<0?'le devolvemos '+money(-dif):'sin diferencia'}</span></div>
+    <div class="totline"><span class="muted">Envío</span><span>${paga==='cliente'?'cliente paga '+money(cobrado):'lo asumimos'}</span></div>
+    <div class="totline big"><span>${devolver>cobrado?'Le devolvemos':'Cobrar al cliente'}</span><span>${money(Math.abs(cobrar-devolver))}</span></div>
+    ${costo?`<div class="totline"><span class="muted">Nos cuesta el envío</span><span style="color:var(--red)">-${money(costo)}</span></div>`:''}`;
+  return {s,e,dif,paga,cobrado,costo};
+}
+async function guardarCambio(){
+  const c=cbCalc(); if(!c) return;
+  if(!c.s){ toast('Elige la prenda que devuelve'); return; }
+  if(!c.e){ toast('Elige la prenda nueva'); return; }
+  const nombre=document.getElementById('cb-nombre').value.trim(), tel=document.getElementById('cb-tel').value.trim();
+  const ciudad=document.getElementById('cb-ciudad').value.trim(), dir=document.getElementById('cb-dir').value.trim();
+  if(!nombre || !tel || !ciudad || !dir){ toast('Faltan datos del cliente para el envío'); return; }
+  const origen=cbSegVal('cb-origen');
+  if(origen==='tienda' && !(c.e.stock>0) && !confirm(`La tienda tiene ${c.e.stock||0} de ${c.e.color} ${c.e.talla}. ¿Registrar igual?`)) return;
+  const btn=document.getElementById('cb-guardar'); btn.disabled=true; btn.textContent='Guardando…';
+  const row={ registrado_por:VENDEDOR, venta_id:CB_VENTA?CB_VENTA.id:null, venta_folio:CB_VENTA?CB_VENTA.folio:(+document.getElementById('cb-folio').value||null),
+    cliente_nombre:nombre, cliente_telefono:tel, ciudad, direccion:dir, motivo:cbSegVal('cb-motivo'), nota:document.getElementById('cb-nota').value.trim()||null,
+    sale_sku:c.s.sku, sale_nombre:c.s.nombre, sale_color:c.s.color, sale_talla:c.s.talla, sale_precio:c.s.precio,
+    entra_sku:c.e.sku, entra_nombre:c.e.nombre, entra_color:c.e.color, entra_talla:c.e.talla, entra_precio:+c.e.precio_venta, entra_costo:+c.e.costo,
+    origen_nueva:origen, diferencia:c.dif, diferencia_estado: c.dif>0?'por_cobrar':c.dif<0?'por_devolver':'sin_diferencia',
+    envio_paga:c.paga, envio_cobrado:c.cobrado, costo_envio:c.costo };
+  const { data:cb, error } = await db.from('cambios').insert(row).select().single();
+  if(error){ toast(/cambios/.test(error.message)?'Falta activar Cambios en Supabase (schema-v6)':'Error: '+error.message); btn.disabled=false; btn.textContent='🔁 Registrar cambio'; return; }
+  if(origen==='tienda'){ // la prenda nueva sale del local
+    const { data:p } = await db.from('productos').select('stock').eq('sku',c.e.sku).single();
+    if(p) await db.from('productos').update({ stock:(p.stock||0)-1 }).eq('sku',c.e.sku);
+  }
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const cobrar=Math.max(c.dif,0)+c.cobrado, devolver=Math.max(-c.dif,0);
+  const msg=`🔁 CAMBIO #${cb.folio}${cb.venta_folio?' (venta #'+cb.venta_folio+')':''}\n👤 Registra: ${VENDEDOR}\nMotivo: ${CB_MOTIVOS[row.motivo]||row.motivo}\n\n↩️ Devuelve: ${corto(c.s.nombre)} ${c.s.color} ${c.s.talla}\n➡️ Enviar: ${corto(c.e.nombre)} ${c.e.color} ${c.e.talla} (${origen==='tienda'?'sale de la tienda':'pedir a proveedora · costo '+money(c.e.costo)})\n\n💵 ${devolver>cobrar?'Devolver al cliente: '+money(devolver-cobrar):'Cobrar al cliente: '+money(cobrar-devolver)}${c.paga==='nosotros'?' · envío lo asumimos':''}\n\n🧍 ${nombre} · 📞 ${tel}\n📍 ${ciudad}\n🏠 ${dir}${row.nota?'\n📝 '+row.nota:''}`;
+  const num=(CONFIG.whatsapp_admin||'593983209216').replace(/\D/g,'');
+  showModal(`<div style="text-align:center"><div style="font-size:44px">🔁</div><b style="font-size:17px">Cambio #${cb.folio} registrado</b>
+    <p class="muted" style="margin:.5rem 0 1rem">Sigue su estado en Envíos → Cambios.</p>
+    <a class="btn btn-green" style="display:block;padding:.9rem;text-decoration:none" href="https://wa.me/${num}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">📲 Compartir por WhatsApp</a>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="closeModal();ENV_VISTA='cambios';go('envios')">Ver cambios</button></div>`);
+  actualizarBadgeEnvios();
+}
+async function renderCambios(){
+  const v=document.getElementById('view');
+  const { data, error } = await db.from('cambios').select('*').order('fecha',{ascending:false}).limit(300);
+  if(error){ v.innerHTML = envTabsHTML()+`<div class="card"><b>Cambios no disponible</b><div class="muted" style="margin-top:.4rem">Falta correr schema-v6-cambios.sql en Supabase.</div></div>`; return; }
+  CB_CACHE=data||[];
+  const abiertos=CB_CACHE.filter(x=>x.estado==='pendiente'||x.estado==='enviado');
+  const mes=new Date().toISOString().slice(0,7), delMes=CB_CACHE.filter(x=>x.estado!=='anulado' && x.fecha.slice(0,7)===mes);
+  const sum=(a,f)=>a.reduce((s,x)=>s+(+f(x)||0),0);
+  const costoMes=sum(delMes,x=>x.costo_envio), cobradoMes=sum(delMes,x=>x.envio_cobrado)+sum(delMes.filter(x=>x.diferencia_estado==='cobrada'),x=>x.diferencia)-sum(delMes.filter(x=>x.diferencia_estado==='devuelta'),x=>-x.diferencia);
+  const pendDinero=CB_CACHE.filter(x=>x.estado!=='anulado' && (x.diferencia_estado==='por_cobrar'||x.diferencia_estado==='por_devolver'));
+  const lista = CB_FILTRO==='abiertos'?abiertos : CB_FILTRO==='todos'?CB_CACHE : CB_CACHE.filter(x=>x.estado===CB_FILTRO);
+  const chip=(f,l)=>`<button onclick="CB_FILTRO='${f}';renderCambios()" style="padding:.4rem .8rem;border-radius:20px;border:1px solid ${CB_FILTRO===f?'var(--gold)':'var(--border)'};background:${CB_FILTRO===f?'var(--gold)':'var(--surface2)'};color:${CB_FILTRO===f?'#000':'var(--text)'};font-size:12px">${l}</button>`;
+  v.innerHTML = envTabsHTML()+`
+    <div class="row" style="justify-content:space-between;margin-bottom:.8rem"><h2 class="page" style="margin:0">Cambios de prenda</h2><button class="btn btn-gold" onclick="abrirCambio()">＋ Nuevo cambio</button></div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">🔁 Abiertos</div><div class="v">${abiertos.length}</div><div class="muted" style="font-size:11px">${abiertos.filter(x=>x.estado==='pendiente').length} por enviar</div></div>
+      <div class="kpi"><div class="l">💵 Diferencias pendientes</div><div class="v" style="color:var(--yellow)">${pendDinero.length}</div><div class="muted" style="font-size:11px">por cobrar o devolver</div></div>
+      <div class="kpi"><div class="l">🚚 Envíos de cambios (mes)</div><div class="v" style="color:var(--red)">${money(costoMes)}</div><div class="muted" style="font-size:11px">${delMes.length} cambio(s)</div></div>
+      <div class="kpi"><div class="l">Resultado del mes</div><div class="v" style="color:${cobradoMes-costoMes>=0?'var(--green)':'var(--red)'}">${money(cobradoMes-costoMes)}</div><div class="muted" style="font-size:11px">cobrado − costo de envíos</div></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem">${chip('abiertos','Abiertos')}${chip('completado','Completados')}${chip('anulado','Anulados')}${chip('todos','Todos')}</div>
+    ${lista.length?lista.map(cbCard).join(''):'<div class="empty">No hay cambios en esta vista</div>'}`;
+}
+function cbCard(x){
+  const [et,eb]=CB_EST[x.estado]||CB_EST.pendiente;
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const dif=+x.diferencia||0;
+  const difTxt = x.diferencia_estado==='por_cobrar'?`<span style="color:var(--yellow)">cobrar ${money(dif)}</span>` : x.diferencia_estado==='cobrada'?`cobrada ${money(dif)} ✓`
+               : x.diferencia_estado==='por_devolver'?`<span style="color:var(--yellow)">devolver ${money(-dif)}</span>` : x.diferencia_estado==='devuelta'?`devuelta ${money(-dif)} ✓` : 'sin diferencia';
+  let acc='';
+  if(x.estado==='pendiente') acc+=`<div class="grid2" style="margin-top:.6rem"><input class="fld" id="cbg-${x.id}" placeholder="N° de guía" value="${cbEsc(x.guia)}"><input class="fld" id="cbc-${x.id}" type="number" step="0.5" placeholder="Costo envío $" value="${+x.costo_envio?(+x.costo_envio).toFixed(2):''}"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="cbEnviado('${x.id}')">🚚 Marcar enviado</button>`;
+  const botones=[];
+  if(x.estado!=='anulado' && !x.devuelta_recibida) botones.push(`<button class="btn btn-ghost" onclick="cbDevuelta('${x.id}')">📦 Llegó la prenda devuelta</button>`);
+  if(x.estado!=='anulado' && x.diferencia_estado==='por_cobrar') botones.push(`<button class="btn btn-ghost" onclick="cbDinero('${x.id}','cobrada')">💵 Ya pagó ${money(dif)}</button>`);
+  if(x.estado!=='anulado' && x.diferencia_estado==='por_devolver') botones.push(`<button class="btn btn-ghost" onclick="cbDinero('${x.id}','devuelta')">💸 Ya le devolvimos ${money(-dif)}</button>`);
+  if(x.estado==='enviado') botones.push(`<button class="btn btn-green" onclick="cbCerrar('${x.id}')">✅ Cerrar cambio</button>`);
+  if(ES_ADMIN && (x.estado==='pendiente'||x.estado==='enviado')) botones.push(`<button class="btn btn-ghost" style="color:var(--red)" onclick="cbAnular('${x.id}')">✖ Anular</button>`);
+  if(botones.length) acc+=`<div class="grid2" style="margin-top:.5rem">${botones.join('')}</div>`;
+  return `<div class="card env-card st-${x.estado==='pendiente'?'por_despachar':x.estado==='enviado'?'en_camino':x.estado==='completado'?'entregado':'rechazado'}">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>Cambio #${x.folio}</b> <span class="muted" style="font-size:12px">· ${new Date(x.fecha).toLocaleDateString('es-EC',{day:'numeric',month:'short'})}${x.venta_folio?' · venta #'+x.venta_folio:''} · ${CB_MOTIVOS[x.motivo]||x.motivo||''}</span></div>
+      <span class="badge ${eb}">${et}</span></div>
+    <div style="font-size:13px;margin-top:.4rem">↩️ ${cbEsc(corto(x.sale_nombre))} · ${cbEsc(x.sale_color)} · <b>${cbEsc(x.sale_talla)}</b> ${x.devuelta_recibida?`<span class="muted">(recibida${x.devuelta_a_tienda?', a la tienda':''})</span>`:'<span style="color:var(--yellow)">(falta recibir)</span>'}</div>
+    <div style="font-size:13px">➡️ ${cbEsc(corto(x.entra_nombre))} · ${cbEsc(x.entra_color)} · <b>${cbEsc(x.entra_talla)}</b> <span class="muted">(${x.origen_nueva==='tienda'?'de la tienda':'de la proveedora'})</span></div>
+    <div style="font-size:13px;margin-top:.3rem">🧍 ${cbEsc(x.cliente_nombre)} · 📞 ${cbEsc(x.cliente_telefono)} · 📍 ${cbEsc(x.ciudad)}</div>
+    <div class="muted" style="font-size:12px">🏠 ${cbEsc(x.direccion)}${x.nota?' · 📝 '+cbEsc(x.nota):''}</div>
+    <div class="totline" style="margin-top:.3rem"><span class="muted">Diferencia</span><span>${difTxt}</span></div>
+    <div class="totline"><span class="muted">Envío</span><span>${x.envio_paga==='cliente'?'cliente pagó '+money(x.envio_cobrado):'lo asumimos'}${+x.costo_envio?` · nos costó ${money(x.costo_envio)}`:''}</span></div>
+    ${x.guia?`<div style="font-size:13px">📦 Guía: <b>${cbEsc(x.guia)}</b></div>`:''}
+    ${acc}</div>`;
+}
+const cbFind=id=>CB_CACHE.find(x=>x.id===id);
+async function cbUpd(id, upd, ok){ const { error } = await db.from('cambios').update(upd).eq('id',id); if(error){ toast('Error: '+error.message); return false; } toast(ok); renderCambios(); actualizarBadgeEnvios(); return true; }
+function cbEnviado(id){
+  const guia=(document.getElementById('cbg-'+id).value||'').trim(), costo=document.getElementById('cbc-'+id).value;
+  if(!guia){ toast('Escribe el número de guía'); return; }
+  const upd={ estado:'enviado', guia, enviado_at:new Date().toISOString() };
+  if(costo!=='' && !isNaN(+costo)) upd.costo_envio=Math.max(0,+costo);
+  cbUpd(id, upd, '🚚 Cambio enviado');
+}
+async function cbDevuelta(id){
+  const x=cbFind(id); if(!x) return;
+  const aTienda=confirm(`Llegó la prenda devuelta: ${x.sale_color} ${x.sale_talla}.\n\n¿Queda en la tienda para venderla?\nAceptar = sí, se suma al stock · Cancelar = no (vuelve a la proveedora o está dañada)`);
+  if(aTienda && x.sale_sku){
+    const { data:p } = await db.from('productos').select('stock').eq('sku',x.sale_sku).single();
+    if(p) await db.from('productos').update({ stock:(p.stock||0)+1 }).eq('sku',x.sale_sku);
+  }
+  cbUpd(id, { devuelta_recibida:true, devuelta_a_tienda:aTienda }, aTienda?'📦 Recibida · +1 al stock':'📦 Prenda devuelta recibida');
+}
+function cbDinero(id, nuevo){
+  const x=cbFind(id); if(!x) return;
+  if(!confirm(nuevo==='cobrada'?`¿El cliente ya pagó la diferencia de ${money(x.diferencia)}?`:`¿Ya le devolviste ${money(-x.diferencia)} al cliente?`)) return;
+  cbUpd(id, { diferencia_estado:nuevo }, '✓ Registrado');
+}
+function cbCerrar(id){
+  const x=cbFind(id); if(!x) return;
+  const pend=[!x.devuelta_recibida?'no ha llegado la prenda devuelta':null, x.diferencia_estado==='por_cobrar'?'falta cobrar la diferencia':null, x.diferencia_estado==='por_devolver'?'falta devolver la diferencia':null].filter(Boolean);
+  if(!confirm(pend.length?`Ojo: ${pend.join(' y ')}.\n¿Cerrar el cambio igual?`:'¿El cliente ya recibió su prenda nueva? Se cierra el cambio.')) return;
+  cbUpd(id, { estado:'completado', cerrado_at:new Date().toISOString() }, '✅ Cambio completado');
+}
+async function cbAnular(id){
+  const x=cbFind(id); if(!x) return;
+  if(!confirm(`¿Anular el cambio #${x.folio}?${x.origen_nueva==='tienda'&&x.estado==='pendiente'?'\nLa prenda nueva vuelve al stock de la tienda.':''}`)) return;
+  if(x.origen_nueva==='tienda' && x.estado==='pendiente' && x.entra_sku){
+    const { data:p } = await db.from('productos').select('stock').eq('sku',x.entra_sku).single();
+    if(p) await db.from('productos').update({ stock:(p.stock||0)+1 }).eq('sku',x.entra_sku);
+  }
+  cbUpd(id, { estado:'anulado', cerrado_at:new Date().toISOString() }, 'Cambio anulado');
 }
 
 // ════════════ PEDIDOS PARA STOCK — compra a la proveedora para la tienda ════════════

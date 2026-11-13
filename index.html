@@ -73,6 +73,19 @@ label.lbl{font-size:12px;color:var(--soft);display:block;margin-bottom:.25rem}
 .wz-btn:active{border-color:var(--gold);background:#2c2c2c}
 .wz-btn .sub{font-size:11px;color:var(--soft);font-weight:400}
 .wz-swatch{width:28px;height:28px;border-radius:50%;border:2px solid var(--border)}
+.wz-foto{width:100%;aspect-ratio:3/4;border-radius:8px;overflow:hidden;border:1px solid var(--border);display:block}
+.wz-foto img{width:100%;height:100%;object-fit:cover;display:block}
+.wz-btn.con-foto{padding:.4rem .4rem .55rem;justify-content:flex-start}
+.wz-sec{font-size:12px;font-weight:600;color:var(--soft);margin:.9rem 0 .4rem;text-transform:uppercase;letter-spacing:.04em}
+.wz-sec.ok{color:var(--green)}
+.wz-confirma{display:flex;gap:.7rem;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:.5rem;margin-bottom:.7rem}
+.wz-confirma .wz-foto{width:92px;flex:none}
+.cart-thumb{width:38px;height:50px;border-radius:6px;overflow:hidden;flex:none;border:1px solid var(--border);margin-right:.55rem}
+.cart-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.sin-stock-item{display:flex;gap:.7rem;align-items:center;margin:.6rem 0}
+.sin-stock-item .wz-foto{width:70px;flex:none}
+.alt-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin:.4rem 0 .8rem}
+.alt-grid button{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:.3rem;font-size:10px;cursor:pointer;line-height:1.2}
 .wz-crumb{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.7rem}
 .wz-crumb span{background:rgba(201,168,76,.12);color:var(--gold);padding:.22rem .6rem;border-radius:20px;font-size:12px;font-weight:600}
 .wz-back{background:none;border:none;color:var(--soft);font-size:13px;cursor:pointer;margin-left:auto;padding:.2rem .4rem}
@@ -382,6 +395,34 @@ Object.assign(COLOR_HEX,{'Celeste':'#a9c3e6','Rosado':'#e9a9c1','Cobalto':'#3e5f
 // Prendas de liquidación (29 sep 2026): costo 0 (ya pagadas) y precio 0 → se venden con "$ Precio final"
 Object.assign(PRENDA_LABEL,{liq_camisa_tommy:'Camisa Tommy · Liq.',liq_polo_mujer:'Polo Mujer · Liq.',liq_camisa_corta:'Camisa M. Corta · Liq.',liq_camiseta_tommy:'Camiseta Tommy · Liq.',liq_camiseta_prada:'Camiseta Prada · Liq.',liq_pantaloneta_polo:'Pantaloneta Polo · Liq.'});
 Object.assign(COLOR_HEX,{'Beige':'#d8c3a5','Amarillo/Negro':'linear-gradient(135deg,#f4d03f 50%,#1a1a1a 50%)','Blanco rayas rojas':'repeating-linear-gradient(90deg,#f5f5f5 0 5px,#c0392b 5px 8px)'});
+// ── Fotos por prenda y color (13 nov 2026): la vendedora elige VIENDO la prenda, no solo el nombre del color.
+// Son las miniaturas del catálogo público (img/t = 240px, ~3 KB c/u). Si un color no tiene foto, se ve la muestra de color.
+const FOTO_BASE='https://athleticastudiofit-star.github.io/polos593-catalogo/img/';
+const slugColor = c => String(c).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+const FOTO_OX={'Amarillo':'amarillo','Azul Marino':'navy-new','Blanco':'blanco','Café':'cafe','Celeste Claro':'celeste-claro','Negro':'negro','Rojo':'rojo','Rosa Pastel':'rosa','Turquesa':'turquesa','Verde Oliva':'verde-oliva'};
+const FOTO_RL={'Azul Rey':'01','Verde Oliva':'02','Rosa Pastel':'03','Celeste Claro':'04','Naranja':'05','Rojo Intenso':'06','Celeste Cielo':'07','Verde Bosque':'08','Amarillo':'09','Gris Jaspe':'10','Verde Agua':'11','Azul Marino':'12','Celeste 2':'13','Verde Lima':'14','Gris Oscuro':'15','Verde Menta':'16'};
+const FOTO_LC={'Azul Marino':'01','Verde Agua':'02','Gris Jaspe':'03','Verde Bosque':'04','Celeste Pastel':'05','Amarillo':'06'};
+const FOTO_LISTA={
+  camisa_rayada_hombre:['rayadas/model-h-rayas-',['Azul Marino','Celeste','Cobalto','Negro','Rojo','Rosado','Verde Agua','Verde Nilo']],
+  camisa_rayada_mujer:['rayadas/model-m-rayas-',['Azul Marino','Blanco Raya Celeste','Blanco Raya Marino','Celeste Cielo','Celeste','Cobalto','Gris Azulado','Negro','Rojo','Rosado','Verde Menta']],
+  bermuda_hombre:['bermudas/bermuda-lc-',['Azul Marino','Blanco','Camel','Celeste','Rojo','Turquesa']],
+  vestido_polo_rl:['vestidos/vestido-polo-rl-color-',['Azul Marino','Azul Rey','Beige','Blanco','Celeste','Negro','Rojo','Rosado']],
+  vestido_tommy:['vestidos/vestido-tommy-color-',['Azul Marino','Blanco','Celeste','Negro','Rojo','Rosado']]
+};
+function fotoPath(tipo,color){
+  if(tipo==='camisa_hombre'||tipo==='camisa_mujer'){ const x=FOTO_OX[color]; return x?`camisa-prem-${tipo==='camisa_mujer'?'m':'h'}-${x}`:null; }
+  if(tipo==='polo_pique'||tipo==='polo_pique_mujer'){ if(color==='Beige') return 'reales/2026-11/IMG_2381'; const n=FOTO_RL[color]; return n?`polo-rl-${n}`:null; }
+  if(tipo==='polo_lacoste'){ const n=FOTO_LC[color]; return n?`polo-lc-${n}`:null; }
+  if(tipo==='gorra'){ return ['Azul','Beige','Café','Celeste','Gris','Rojo','Vino'].includes(color)?`gorras/gorra-${slugColor(color)}-1`:null; }
+  const l=FOTO_LISTA[tipo]; return (l && l[1].includes(color)) ? l[0]+slugColor(color) : null;
+}
+const fotoDe = (tipo,color) => { const f=fotoPath(tipo,color); return f?`${FOTO_BASE}t/assets/${f}.webp`:null; };
+// Cuadro con la foto; si no hay foto (o no carga) queda la muestra de color de siempre
+function fotoHTML(tipo,color,cls){
+  const u=fotoDe(tipo,color), bg=COLOR_HEX[color]||'#888';
+  return `<span class="${cls||'wz-foto'}" style="background:${bg}">${u?`<img src="${u}" alt="" loading="lazy" onerror="this.remove()">`:''}</span>`;
+}
+const enTienda = p => Math.max(0,+p.stock||0);   // nunca mostrar stock negativo
 // Etiqueta/ícono de un tipo: si no está en los mapas, usa el nombre del producto (así un tipo nuevo no sale en crudo)
 const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)||{}).nombre) || t;
 const prendaIcon  = t => PRENDA_ICON[t] || (String(t).startsWith('liq_') ? '🏷️' : '👕');
@@ -409,16 +450,45 @@ function renderWizard(){
     body=`<div class="wz-step">¿Qué prenda?</div><div class="wz-grid">${tipos.map(t=>`<button class="wz-btn" onclick="pickPrenda('${t}')"><span style="font-size:26px">${prendaIcon(t)}</span>${prendaLabel(t)}</button>`).join('')}</div>`;
   } else if(!SEL.color){
     const subset=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda);
-    const byColor={}; subset.forEach(p=>{ byColor[p.color]=(byColor[p.color]||0)+p.stock; });
-    const colores=Object.keys(byColor).sort((a,b)=>byColor[b]-byColor[a]); // en tienda primero
-    body=`<div class="wz-step">¿Qué color?</div><div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${colores.map(c=>`<button class="wz-btn" onclick="pickColor('${c.replace(/'/g,"\\'")}')"><span class="wz-swatch" style="background:${COLOR_HEX[c]||'#888'}"></span><span style="font-size:11px">${c}</span><span class="sub" style="color:${byColor[c]>0?'var(--green)':'var(--soft)'}">${byColor[c]>0?'tienda '+byColor[c]:'catálogo'}</span></button>`).join('')}</div>`;
+    const byColor={}; subset.forEach(p=>{ byColor[p.color]=(byColor[p.color]||0)+enTienda(p); });
+    const colores=Object.keys(byColor).sort((a,b)=>byColor[b]-byColor[a] || a.localeCompare(b));
+    const card=c=>`<button class="wz-btn con-foto" onclick="pickColor('${c.replace(/'/g,"\\'")}')">${fotoHTML(SEL.prenda,c)}<span style="font-size:12px">${c}</span><span class="sub" style="color:${byColor[c]>0?'var(--green)':'var(--soft)'}">${byColor[c]>0?'en tienda: '+byColor[c]:'no hay en tienda'}</span></button>`;
+    const hay=colores.filter(c=>byColor[c]>0), noHay=colores.filter(c=>!(byColor[c]>0));
+    const grid=l=>`<div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${l.map(card).join('')}</div>`;
+    body=`<div class="wz-step">¿Qué color? <span class="muted" style="font-size:13px;font-weight:400">· mira la foto</span></div>`
+      + (hay.length?`<div class="wz-sec ok">✓ En la tienda</div>${grid(hay)}`:'')
+      + (noHay.length?`<div class="wz-sec">${hay.length?'Otros colores · solo bajo pedido':'Bajo pedido · no hay en tienda'}</div>${grid(noHay)}`:'');
   } else {
     const opts=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda && p.color===SEL.color).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
     const precio=opts[0]?(+opts[0].precio_venta>0?money(opts[0].precio_venta):'🏷️ liquidación: el precio se pone en "$ Precio final"'):'';
-    body=`<div class="wz-step">¿Qué talla? <span class="muted" style="font-size:13px;font-weight:400">· ${precio}</span></div>
-      <div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">${opts.map(p=>`<button class="wz-btn" style="min-height:64px" onclick="pickTalla('${p.sku}')"><span style="font-size:22px;font-weight:700">${p.talla}</span><span class="sub">stock ${p.stock}</span></button>`).join('')}</div>`;
+    body=`<div class="wz-confirma">${fotoHTML(SEL.prenda,SEL.color)}<div><b>${prendaLabel(SEL.prenda)}</b><br>${SEL.color}<br><small class="muted">¿Es esta? Si no, toca ‹ Volver y elige otro color.</small></div></div>
+      <div class="wz-step">¿Qué talla? <span class="muted" style="font-size:13px;font-weight:400">· ${precio}</span></div>
+      <div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">${opts.map(p=>`<button class="wz-btn" style="min-height:64px" onclick="pickTalla('${p.sku}')"><span style="font-size:22px;font-weight:700">${p.talla}</span><span class="sub" style="color:${enTienda(p)>0?'var(--green)':'var(--soft)'}">${enTienda(p)>0?'en tienda: '+enTienda(p):'no hay'}</span></button>`).join('')}</div>`;
   }
   el.innerHTML = crumb + body;
+}
+// Aviso: en el carrito de una venta LOCAL hay prendas que el sistema no tiene en la tienda
+function avisoSinStock(faltan){
+  const bloques=faltan.map(c=>{
+    const p=productosCache.find(x=>x.sku===c.sku);
+    const alt=productosCache.filter(x=>x.tipo===p.tipo && x.talla===p.talla && x.sku!==p.sku && enTienda(x)>0 && (x.genero===p.genero||x.genero==='unisex'||p.genero==='unisex'));
+    return `<div class="sin-stock-item">${fotoHTML(p.tipo,p.color)}<div><b>${p.nombre}</b><br>${p.color} · talla <b>${p.talla}</b><br><small style="color:var(--yellow)">El sistema dice que de esta ${enTienda(p)>0?'solo queda '+enTienda(p):'no queda ninguna'} en la tienda.</small></div></div>
+      ${alt.length?`<div class="muted" style="font-size:12px">En talla ${p.talla} sí hay en la tienda — toca la que de verdad es:</div>
+      <div class="alt-grid">${alt.map(x=>`<button onclick="cambiarPrenda('${c.sku}','${x.sku}')">${fotoHTML(x.tipo,x.color)}${x.color}</button>`).join('')}</div>`
+      :`<div class="muted" style="font-size:12px;margin-bottom:.8rem">En el sistema no hay ningún otro color de esta prenda en talla ${p.talla}. Revisa también la talla.</div>`}`;
+  }).join('<hr style="border:0;border-top:1px solid var(--border);margin:.6rem 0">');
+  showModal(`<h3 style="margin:0 0 .3rem">⚠️ Revisa el color antes de guardar</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:.4rem">Mira la etiqueta y compara con la foto.</div>
+    ${bloques}
+    <button class="btn btn-gold" style="width:100%;margin-top:.4rem;padding:.85rem" onclick="closeModal()">‹ Volver al carrito y corregir</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="window._okSinStock=true;closeModal();registrarVenta()">Sí es esa prenda · guardar igual</button>`);
+}
+function cambiarPrenda(viejo,nuevo){
+  const c=cart.find(x=>x.sku===viejo), p=productosCache.find(x=>x.sku===nuevo); if(!c||!p) return;
+  const ya=cart.find(x=>x.sku===nuevo);
+  if(ya){ ya.cantidad+=c.cantidad; cart=cart.filter(x=>x.sku!==viejo); }
+  else Object.assign(c,{sku:p.sku,nombre:p.nombre,talla:p.talla,color:p.color,precio_unit:+p.precio_venta,costo_unit:+p.costo});
+  closeModal(); renderCart(); toast('✓ Cambiado a '+p.color);
 }
 function addCart(sku){
   const p=productosCache.find(x=>x.sku===sku);
@@ -443,6 +513,7 @@ function renderCart(){
   el.innerHTML = cart.length===0 ? '<div class="empty">Agrega productos arriba</div>' :
     cart.map(c=>`
       <div class="cart-line">
+        ${fotoHTML((productosCache.find(x=>x.sku===c.sku)||{}).tipo,c.color,'cart-thumb')}
         <div style="flex:1">
           <div>${c.nombre} · ${c.color||''} · <b>${c.talla||''}</b></div>
           <small class="muted">${c.sku} · ${money(unit(c))} c/u${MODO==='stock'?' (costo)':''}</small>
@@ -542,6 +613,15 @@ async function registrarVenta(){
   if(cart.some(c=>!(+c.precio_unit>0)) && !(DESC_TIPO==='monto_final' && precioFinal>0)){
     toast('Hay prendas de liquidación sin precio: escribe el total en "$ Precio final"'); return;
   }
+  // Venta en el local de una prenda que el sistema NO tiene en tienda: casi siempre es otro color/talla mal elegido.
+  // Se frena y se muestran las que sí hay; solo sigue si la vendedora confirma que es esa.
+  let sinStockNota=null;
+  if(TIPO==='local'){
+    const faltan=cart.filter(c=>{ const p=productosCache.find(x=>x.sku===c.sku); return p && enTienda(p) < c.cantidad; });
+    if(faltan.length && !window._okSinStock){ avisoSinStock(faltan); return; }
+    if(faltan.length) sinStockNota='⚠ Vendida sin stock en el sistema: '+faltan.map(c=>c.sku).join(', ');
+  }
+  window._okSinStock=false;
   btn.disabled=true; btn.textContent='Guardando…';
   const t=calcTotales();
   const esCOD = TIPO==='contraentrega';
@@ -564,7 +644,7 @@ async function registrarVenta(){
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
     metodo_pago: esCOD ? 'Contra entrega' : document.getElementById('pago').value,
-    notas: direccion  // guardamos la dirección exacta aquí
+    notas: [direccion,sinStockNota].filter(Boolean).join(' · ')||null  // dirección exacta (+ aviso si se vendió sin stock)
   };
   if(esCOD){ venta.estado_envio='por_despachar'; venta.estado_envio_at=new Date().toISOString(); }
   const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();

@@ -164,6 +164,10 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>
       Inventario
     </button>
+    <button data-tab="socios" onclick="go('socios')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15a9 9 0 0 1 18 0"/><path d="M3 15h20"/><path d="M12 6V4"/></svg>
+      Gorras
+    </button>
     <button data-tab="cuentas" onclick="go('cuentas')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M16 15h2"/><path d="M6 6V4h12v2"/></svg>
       Cuentas
@@ -246,7 +250,8 @@ async function doLogin(){
   if(!v){ err.textContent='Elige tu nombre'; return; }
   await loadConfig();
   const esAdmin = ADMIN_NAMES.includes(v);
-  const pinOk = esAdmin ? (pin === (CONFIG.pin_admin||'5930')) : (pin === (CONFIG.pin||'0593'));
+  const pinPersonal = CONFIG['pin_'+v];   // vendedores con clave propia (ej. Dani)
+  const pinOk = esAdmin ? (pin === (CONFIG.pin_admin||'5930')) : (pinPersonal ? pin === pinPersonal : pin === (CONFIG.pin||'0593'));
   if(!pinOk){ err.textContent = esAdmin ? 'PIN de administrador incorrecto' : 'PIN incorrecto'; return; }
   VENDEDOR = v; ES_ADMIN = esAdmin;
   localStorage.setItem('p593_vendedor', v);
@@ -262,7 +267,10 @@ async function enterApp(){
   // Asesores: solo Vender. Admin (Homero): todas las pantallas.
   document.querySelectorAll('.nav button').forEach(b=>{
     const t=b.dataset.tab;
-    b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes'||t==='cuentas')) ? 'none' : '';
+    const socio = SOCIOS.includes(VENDEDOR);
+    b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes'||t==='cuentas')) ? 'none'
+      : (t==='socios' && !(ES_ADMIN||socio)) ? 'none'
+      : (socio && (t==='envios'||t==='vendedores')) ? 'none' : '';
   });
   go('vender');
   actualizarBadgeEnvios();
@@ -274,6 +282,7 @@ function logout(){ localStorage.removeItem('p593_auth'); location.reload(); }
 let TAB='vender';
 function go(tab){
   if(!ES_ADMIN && (tab==='inventario'||tab==='reportes'||tab==='cuentas')) tab='vender'; // asesor: solo Vender
+  if(tab==='socios' && !(ES_ADMIN || SOCIOS.includes(VENDEDOR))) tab='vender';
   TAB=tab;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   if(tab==='vender') renderVender();
@@ -282,6 +291,7 @@ function go(tab){
   if(tab==='reportes') renderReportes();
   if(tab==='vendedores') renderVendedores();
   if(tab==='cuentas') renderCuentas();
+  if(tab==='socios') renderSocios();
 }
 
 async function loadProductos(){
@@ -574,7 +584,7 @@ async function cargarMayoristas(){ const { data } = await db.from('mayoristas').
 const precioLista = p => (TIPO==='mayorista' && MODO==='venta' && PM[p.tipo]!=null) ? +PM[p.tipo] : +p.precio_venta;
 function repreciarCarrito(){ cart.forEach(c=>{ const p=productosCache.find(x=>x.sku===c.sku); if(p) c.precio_unit=precioLista(p); }); }
 const provDe = sku => (productosCache.find(p=>p.sku===sku)||{}).proveedor || 'fabiola';
-const provNombre = k => (PROVS[k]&&PROVS[k].nombre) || ({fabiola:'Fabiola · ropa',perfumes:'Proveedor de perfumes'}[k]) || k;
+const provNombre = k => (PROVS[k]&&PROVS[k].nombre) || ({fabiola:'Fabiola · ropa',perfumes:'Proveedor de perfumes',dani:'Sociedad de gorras (Dani y Homero)',propio:'Propio'}[k]) || k;
 const esLocalVenta = () => TIPO==='local' || (TIPO==='mayorista' && MAY_ORIGEN==='tienda');
 function pintarMaySel(){
   const sel=document.getElementById('may-sel'); if(!sel) return;
@@ -1657,13 +1667,16 @@ function pintarStockCheckout(){
   const t=stockTotales();
   const notas=(document.getElementById('stock-notas')||{}).value||'';
   const provs=provsCarrito();
+  const soloGorras = provs.length===1 && provs[0]==='dani';
+  if(soloGorras && +STOCK_ENVIO===ENVIO.provincia) STOCK_ENVIO=0;   // las gorras no vienen de Guayaquil
   el.innerHTML = `
     <div class="muted" style="font-size:12px;margin-bottom:.5rem">Proveedor: <b>${provs.map(provNombre).join(' + ')}</b>${provs.length>1?' <span style="color:var(--yellow)">· registra cada proveedor por separado</span>':''}</div>
-    <label class="lbl">¿Cómo llega?</label>
+    ${provs.length===1&&provs[0]==='dani'?`<div class="card" style="margin:0 0 .6rem;border-left:3px solid var(--gold)">🧢 Gorras de la sociedad: aquí solo entran al stock. Lo que costó la producción regístralo en <b>Gorras → ➕ Gasto</b> (tipo Producción) con quién lo pagó.</div>`:''}
+    <div style="${provs.length===1&&provs[0]==='dani'?'display:none':''}"><label class="lbl">¿Cómo llega?</label>
     <div class="seg" style="margin-bottom:.6rem">
       <button class="${t.consig?'':'on'}" onclick="STOCK_CONSIG=false;pintarStockCheckout()">🛒 Compra<br><small style="font-weight:400;font-size:11px">se paga en la semana</small></button>
       <button class="${t.consig?'on':''}" onclick="STOCK_CONSIG=true;pintarStockCheckout()">🤝 Consignación<br><small style="font-weight:400;font-size:11px">se paga cuando se venda</small></button>
-    </div>
+    </div></div>
     <label class="lbl">¿Ya está en la tienda?</label>
     <div class="seg" style="margin-bottom:.6rem">
       <button class="${STOCK_LLEGO?'on':''}" onclick="stockLlego(true)">✅ Ya entró</button>
@@ -1674,7 +1687,7 @@ function pintarStockCheckout(){
       <input class="fld" id="stock-fecha" type="date" max="${fechaInput(new Date())}" value="${STOCK_FECHA}" onchange="STOCK_FECHA=this.value">
       <button class="btn btn-ghost" onclick="stockAyer()">Ayer</button>
     </div>
-    <label class="lbl">Envío desde Guayaquil (lo pagamos nosotros)</label>
+    <label class="lbl">${soloGorras?'Envío (si hubo; el gasto regístralo en Gorras)':'Envío desde Guayaquil (lo pagamos nosotros)'}</label>
     <input class="fld" id="stock-envio" type="number" step="0.5" min="0" value="${t.envio}" oninput="STOCK_ENVIO=this.value;pintarStockTot()" style="margin-bottom:.6rem">
     <label class="lbl">Nota (opcional)</label>
     <input class="fld" id="stock-notas" placeholder="Ej: mercadería para entregas en Quito" value="${notas.replace(/"/g,'&quot;')}" style="margin-bottom:.4rem">
@@ -1733,11 +1746,12 @@ async function renderStockLista(){
   window._stockItems=its;
   const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
   const detalle=p=>itemsDe(p.id).map(i=>`${i.cantidad}x ${corto(i.nombre)} · ${i.color||''} · ${i.talla||''}`).join('<br>');
-  const enCamino=peds.filter(p=>p.estado==='pedido');
+  const veo = p => !SOLO_TIPOS[VENDEDOR] || p.proveedor==='dani';      // Dani solo ve los pedidos de gorras
+  const enCamino=peds.filter(p=>p.estado==='pedido' && veo(p));
   // Por pagar a la proveedora, agrupado por semana (lunes a domingo)
-  const porPagar=peds.filter(p=>p.estado!=='anulado' && !p.pagado_at);
+  const porPagar=peds.filter(p=>p.estado!=='anulado' && !p.pagado_at && p.proveedor!=='dani' && veo(p));   // las gorras se pagan con la sociedad, no en la liquidación
   const semanas={}; porPagar.forEach(p=>{ const k=lunesDe(p.fecha).toISOString(); (semanas[k]=semanas[k]||[]).push(p); });
-  const recibidos=peds.filter(p=>p.estado==='recibido').slice(0,5);
+  const recibidos=peds.filter(p=>p.estado==='recibido' && veo(p)).slice(0,5);
   el.innerHTML = `
     <h2 class="page" style="margin-top:1.4rem">🚚 Pedidos en camino a la tienda</h2>
     ${enCamino.length?enCamino.map(p=>`<div class="card env-card st-en_camino">
@@ -1925,6 +1939,106 @@ function detalleProveedor(k){
   const pag=x.pagos.map(p=>`${fechaCorta(p.fecha)} · ${money(p.monto)}`).join('\n');
   const msg=`📋 LIQUIDACIÓN · ${provNombre(k)}\n\n${lin||'Sin ventas'}${ped?'\n\n📥 STOCK\n'+ped:''}${pag?'\n\n💸 PAGOS\n'+pag:''}\n\n*Total por pagar: ${money(x.cargos-x.pagado)}*`;
   window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+}
+
+// ════════════ GORRAS · SOCIEDAD Dani + Homero (17 nov 2026) ════════════
+// Punto de partida: config.soc_gorras (cierre del 17 nov, opción A: fondo $141,05 mitad y mitad, lo tiene Homero).
+// Desde el corte: ventas de gorra_jinete (POS) + gastos/producción en soc_movimientos (quién lo pagó: Dani, Homero o Caja).
+//   Caja = fondo + ventas − gastos pagados con la caja.  Ganancia = ventas − todos los gastos.
+//   Parte de cada socio = 50 % del fondo + lo que puso de su bolsillo + 50 % de la ganancia  (las dos partes suman la caja).
+let SOC={};
+async function renderSocios(){
+  const v=document.getElementById('view'); v.innerHTML='<div class="empty">Cargando…</div>';
+  await Promise.all([loadConfig(), loadProductos()]);
+  let cfg={}; try{ cfg=JSON.parse(CONFIG.soc_gorras||'{}'); }catch(e){}
+  const corte=(cfg.corte||'2026-11-17'), desde=corte+'T00:00:00-05:00';
+  const [{data:vs},{data:movs},{data:peds}] = await Promise.all([
+    db.from('ventas').select('id,folio,fecha,tipo,vendedor,cliente_nombre,subtotal,total,envio_cobrado,venta_items(sku,nombre,talla,cantidad,precio_unit)').eq('anulada',false).gte('fecha',desde).order('fecha',{ascending:false}),
+    db.from('soc_movimientos').select('*').eq('sociedad','gorras').order('fecha',{ascending:false}),
+    db.from('pedidos_stock').select('*').eq('proveedor','dani').neq('estado','anulado').order('fecha',{ascending:false}).limit(20)]);
+  const esGJ = sku => String(sku).startsWith('GJ-');
+  const ventas=(vs||[]).filter(x=>(x.venta_items||[]).some(i=>esGJ(i.sku))).map(x=>{
+    const its=x.venta_items.filter(i=>esGJ(i.sku)); const bruto=its.reduce((a,i)=>a+(+i.precio_unit||0)*i.cantidad,0);
+    const ratio = +x.subtotal>0 ? Math.max(0,(+x.total-(+x.envio_cobrado||0)))/(+x.subtotal) : 1;
+    return {...x, its, uds:its.reduce((a,i)=>a+i.cantidad,0), monto:Math.round(bruto*ratio*100)/100};
+  });
+  const M=movs||[], gastos=M.filter(m=>m.tipo==='gasto'||m.tipo==='produccion'), pagosSocio=M.filter(m=>m.tipo==='pago_socio');
+  const sum=(l,f)=>l.reduce((a,x)=>a+(+f(x)||0),0);
+  const tVentas=sum(ventas,x=>x.monto), tGastos=sum(gastos,g=>g.monto);
+  const gCaja=sum(gastos.filter(g=>g.pagado_por==='Caja'),g=>g.monto), gDani=sum(gastos.filter(g=>g.pagado_por==='Dani'),g=>g.monto), gHom=sum(gastos.filter(g=>g.pagado_por==='Homero'),g=>g.monto);
+  const fondo=+cfg.fondo||0, ganancia=tVentas-tGastos;
+  const vDani=sum(ventas.filter(x=>x.vendedor==='Dani'),x=>x.monto), vOtros=tVentas-vDani;
+  const caja=fondo+tVentas-gCaja;
+  const pend=cfg.pendiente_cierre, pendPagado=pend && pagosSocio.some(p=>/cierre/i.test(p.concepto));
+  const stock=productosCache.filter(p=>p.tipo==='gorra_jinete'&&+p.stock>0);
+  const nStock=stock.reduce((a,p)=>a+(+p.stock),0);
+  SOC={ventas,gastos};
+  v.innerHTML = `
+    <h2 class="page">🧢 Gorras · Dani y Homero</h2>
+    <div class="muted" style="font-size:12px;margin:-.4rem 0 .8rem">Socios 50-50 · cuenta desde el cierre del ${fechaCorta(desde)} (21 gorras vendidas, ganancia $74,95)</div>
+    <div class="grid2" style="margin-bottom:.6rem">
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Caja de la sociedad</div><div style="font-size:22px;font-weight:700;color:var(--gold)">${money(caja)}</div></div>
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Gorras en stock</div><div style="font-size:22px;font-weight:700">${nStock}</div></div>
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Vendido desde el corte</div><div style="font-size:20px;font-weight:700;color:var(--green)">${money(tVentas)}</div><div class="muted" style="font-size:11px">${sum(ventas,x=>x.uds)} gorras</div></div>
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Ganancia desde el corte</div><div style="font-size:20px;font-weight:700;color:${ganancia>=0?'var(--green)':'var(--red)'}">${money(ganancia)}</div><div class="muted" style="font-size:11px">ventas − gastos ${money(tGastos)}</div></div>
+    </div>
+    <div class="grid2" style="margin-bottom:1rem">
+      <button class="btn btn-green" style="padding:.8rem" onclick="nuevoGastoSoc()">➕ Registrar gasto</button>
+      <button class="btn btn-gold" style="padding:.8rem" onclick="MODO='stock';cart=[];go('vender')">📥 Ingresar gorras</button>
+    </div>
+    <div class="card">
+      <b>Balance de los socios</b>
+      <div class="muted" style="font-size:12px;margin:.2rem 0 .5rem">El fondo (${money(fondo)}) es mitad de cada uno y lo guarda ${cfg.lo_tiene||'Homero'} para la próxima producción. Aquí se cuadra lo que pasó desde el corte: a cada uno le toca lo que puso de su bolsillo + mitad de la ganancia.</div>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr class="muted"><td></td><td style="text-align:right">Dani</td><td style="text-align:right">Homero</td></tr>
+        <tr><td>Fondo (mitad c/u)</td><td style="text-align:right">${money(fondo/2)}</td><td style="text-align:right">${money(fondo/2)}</td></tr>
+        <tr><td>Gastos que pagó de su bolsillo</td><td style="text-align:right">${money(gDani)}</td><td style="text-align:right">${money(gHom)}</td></tr>
+        <tr><td>Mitad de la ganancia</td><td style="text-align:right">${money(ganancia/2)}</td><td style="text-align:right">${money(ganancia/2)}</td></tr>
+        <tr style="font-weight:700"><td>Le toca cobrar</td><td style="text-align:right">${money(gDani+ganancia/2)}</td><td style="text-align:right">${money(gHom+ganancia/2)}</td></tr>
+        <tr class="muted"><td>Ya cobró de las ventas</td><td style="text-align:right">${money(vDani)}</td><td style="text-align:right">${money(vOtros-gCaja)}</td></tr>
+      </table>
+      ${(()=>{ const d=Math.round((gDani+ganancia/2-vDani)*100)/100; return Math.abs(d)<0.01?'<div style="margin-top:.5rem;color:var(--green)">✓ Están iguales</div>':`<div style="margin-top:.5rem">Para quedar iguales: <b>${d>0?'Homero le pasa a Dani':'Dani le pasa a Homero'} ${money(Math.abs(d))}</b></div>`; })()}
+      ${pend&&!pendPagado?`<div style="margin-top:.5rem;font-size:12px;color:var(--yellow)">Pendiente del cierre del ${fechaCorta(desde)}: ${pend.de} le paga ${money(pend.monto)} a ${pend.a}. <a href="#" onclick="pagoCierreSoc();return false" style="color:var(--gold)">Marcar como pagado</a></div>`:''}
+    </div>
+    <h2 class="page" style="margin-top:1.2rem">Ventas desde el corte</h2>
+    ${ventas.length?`<div class="card" style="padding:.4rem .8rem">${ventas.map(x=>`<div style="padding:.45rem 0;border-bottom:1px solid var(--border);font-size:13px"><div class="row" style="justify-content:space-between"><b>#${x.folio} · ${x.cliente_nombre||'Cliente'}</b><b>${money(x.monto)}</b></div><div class="muted" style="font-size:12px">${fechaCorta(x.fecha)} · ${x.vendedor} · ${x.its.map(i=>`${i.cantidad>1?i.cantidad+'x ':''}${(productosCache.find(p=>p.sku===i.sku)||{}).color||i.sku}`).join(', ')}</div></div>`).join('')}</div>`:'<div class="empty" style="padding:1rem">Aún no hay ventas desde el corte. Se registran en Vender → Gorra Jinete.</div>'}
+    <h2 class="page" style="margin-top:1.2rem">Gastos e inversiones</h2>
+    ${gastos.length?`<div class="card" style="padding:.4rem .8rem">${gastos.map(g=>`<div style="padding:.45rem 0;border-bottom:1px solid var(--border);font-size:13px"><div class="row" style="justify-content:space-between"><b>${g.concepto}</b><b>${money(g.monto)}</b></div><div class="muted" style="font-size:12px">${fechaCorta(g.fecha)} · ${g.tipo==='produccion'?'Producción':'Gasto'} · pagó ${g.pagado_por==='Caja'?'la caja de la sociedad':g.pagado_por}${g.nota?' · '+g.nota:''} · anotó ${g.registrado_por||''}</div></div>`).join('')}</div>`:'<div class="empty" style="padding:1rem">Aún no hay gastos desde el corte.</div>'}
+    <h2 class="page" style="margin-top:1.2rem">Stock</h2>
+    <div class="card">${stock.length?stock.map(p=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:.2rem 0"><span>${p.color}</span><b>${p.stock}</b></div>`).join(''):'<span class="muted" style="font-size:13px">No hay gorras cargadas en el sistema. Ingrésalas con 📥 Ingresar gorras.</span>'}
+      ${(peds||[]).length?`<div class="muted" style="font-size:12px;margin-top:.5rem">Últimos ingresos: ${(peds||[]).slice(0,5).map(p=>`#${p.folio} ${fechaCorta(p.fecha)} (${p.estado==='recibido'?'llegó':'en camino'})`).join(' · ')}</div>`:''}</div>
+    <div class="muted" style="font-size:12px;margin:1rem 0 2rem">Producción nueva: 1) 📥 Ingresar gorras (entran al stock) y 2) ➕ Registrar gasto tipo Producción con quién la pagó.</div>`;
+}
+function nuevoGastoSoc(){
+  const yo = SOCIOS.includes(VENDEDOR)?VENDEDOR:(ES_ADMIN?'Homero':'Caja');
+  showModal(`<h3 style="margin:0 0 .6rem">➕ Gasto de la sociedad</h3>
+    <div class="seg" style="margin-bottom:.5rem"><button id="sg-t-g" class="on" onclick="SG_TIPO='gasto';this.classList.add('on');document.getElementById('sg-t-p').classList.remove('on')">Gasto</button><button id="sg-t-p" onclick="SG_TIPO='produccion';this.classList.add('on');document.getElementById('sg-t-g').classList.remove('on')">Producción de gorras</button></div>
+    <input class="fld" id="sg-con" placeholder="¿En qué? (ej: bordado, envío, etiquetas)" style="margin-bottom:.5rem">
+    <div class="grid2" style="margin-bottom:.5rem"><input class="fld" id="sg-monto" type="number" step="0.01" min="0" placeholder="Monto $"><input class="fld" id="sg-fecha" type="date" value="${fechaInput(new Date())}" max="${fechaInput(new Date())}"></div>
+    <label class="lbl">¿Quién lo pagó?</label>
+    <select class="fld" id="sg-quien" style="margin-bottom:.5rem"><option ${yo==='Dani'?'selected':''}>Dani</option><option ${yo==='Homero'?'selected':''}>Homero</option><option value="Caja">Caja de la sociedad (dinero de las ventas)</option></select>
+    <input class="fld" id="sg-nota" placeholder="Nota (opcional)" style="margin-bottom:.7rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="guardarGastoSoc()">Guardar</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="closeModal()">Cancelar</button>`);
+  SG_TIPO='gasto';
+}
+let SG_TIPO='gasto';
+async function guardarGastoSoc(){
+  const concepto=(document.getElementById('sg-con').value||'').trim(), monto=Math.round((parseFloat(document.getElementById('sg-monto').value)||0)*100)/100;
+  if(!concepto||!(monto>0)){ toast('Escribe en qué y el monto'); return; }
+  const f=document.getElementById('sg-fecha').value, esHoy=f===fechaInput(new Date());
+  const { error } = await db.from('soc_movimientos').insert({ sociedad:'gorras', tipo:SG_TIPO, concepto, monto, pagado_por:document.getElementById('sg-quien').value,
+    nota:(document.getElementById('sg-nota').value||'').trim()||null, fecha: esHoy?new Date().toISOString():new Date(f+'T12:00:00').toISOString(), registrado_por:VENDEDOR });
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('✅ Gasto guardado'); renderSocios();
+}
+async function pagoCierreSoc(){
+  let cfg={}; try{ cfg=JSON.parse(CONFIG.soc_gorras||'{}'); }catch(e){}
+  const p=cfg.pendiente_cierre; if(!p) return;
+  if(!confirm(`¿${p.de} ya le pagó ${money(p.monto)} a ${p.a} (cierre del 17 nov)?`)) return;
+  const { error } = await db.from('soc_movimientos').insert({ sociedad:'gorras', tipo:'pago_socio', concepto:'Pago del cierre 17 nov (opción A)', monto:p.monto, pagado_por:p.de, nota:'a '+p.a, registrado_por:VENDEDOR });
+  if(error){ toast('Error: '+error.message); return; }
+  toast('✅ Pago del cierre registrado'); renderSocios();
 }
 
 // ════════════ VENDEDORES — programa de revendedores ════════════

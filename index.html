@@ -32,7 +32,7 @@ input,select{font-family:inherit}
 
 /* Bottom nav (mobile-first) */
 .nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);display:flex;z-index:50}
-.nav button{flex:1;background:none;border:none;color:var(--soft);padding:.7rem;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:.2rem}
+.nav button{flex:1;min-width:0;background:none;border:none;color:var(--soft);padding:.6rem .1rem;font-size:10.5px;display:flex;flex-direction:column;align-items:center;gap:.2rem;white-space:nowrap}
 .nav button.active{color:var(--gold)}
 .nav button svg{width:22px;height:22px}
 
@@ -164,6 +164,10 @@ td{padding:.5rem .4rem;border-bottom:1px solid var(--border);font-size:13px}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>
       Inventario
     </button>
+    <button data-tab="cuentas" onclick="go('cuentas')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M16 15h2"/><path d="M6 6V4h12v2"/></svg>
+      Cuentas
+    </button>
     <button data-tab="reportes" onclick="go('reportes')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       Reportes
@@ -258,7 +262,7 @@ async function enterApp(){
   // Asesores: solo Vender. Admin (Homero): todas las pantallas.
   document.querySelectorAll('.nav button').forEach(b=>{
     const t=b.dataset.tab;
-    b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes')) ? 'none' : '';
+    b.style.display = (!ES_ADMIN && (t==='inventario'||t==='reportes'||t==='cuentas')) ? 'none' : '';
   });
   go('vender');
   actualizarBadgeEnvios();
@@ -269,7 +273,7 @@ function logout(){ localStorage.removeItem('p593_auth'); location.reload(); }
 // ── NAV ──
 let TAB='vender';
 function go(tab){
-  if(!ES_ADMIN && (tab==='inventario'||tab==='reportes')) tab='vender'; // asesor: solo Vender
+  if(!ES_ADMIN && (tab==='inventario'||tab==='reportes'||tab==='cuentas')) tab='vender'; // asesor: solo Vender
   TAB=tab;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   if(tab==='vender') renderVender();
@@ -277,6 +281,7 @@ function go(tab){
   if(tab==='inventario') renderInventario();
   if(tab==='reportes') renderReportes();
   if(tab==='vendedores') renderVendedores();
+  if(tab==='cuentas') renderCuentas();
 }
 
 async function loadProductos(){
@@ -289,7 +294,7 @@ async function loadProductos(){
 async function renderVender(){
   const v=document.getElementById('view');
   v.innerHTML='<div class="empty">Cargando…</div>';
-  await loadProductos();
+  await Promise.all([loadProductos(), cargarConfigCuentas()]);
   v.innerHTML = `
     <div id="cod-banner"></div>
     <div class="seg" style="margin-bottom:1rem">
@@ -314,6 +319,26 @@ async function renderVender(){
         <button id="t-local" class="on" onclick="setTipo('local')">🏬 Local</button>
         <button id="t-drop" onclick="setTipo('dropshipping')">📦 Dropshipping</button>
         <button id="t-cod" onclick="setTipo('contraentrega')">🚚 Contra entrega</button>
+        ${ES_ADMIN?`<button id="t-may" onclick="setTipo('mayorista')">🤝 Mayorista</button>`:''}
+      </div>
+      <div id="may-fields" style="display:none;margin-bottom:.8rem">
+        <label class="lbl">¿A qué mayorista?</label>
+        <div class="grid2" style="margin-bottom:.4rem"><select class="fld" id="may-sel" onchange="MAY_SEL=this.value;pintarMaySaldo()"></select><button class="btn btn-ghost" onclick="nuevoMayorista(true)">➕ Nuevo mayorista</button></div>
+        <div id="may-saldo" class="muted" style="font-size:12px;margin-bottom:.6rem"></div>
+        <label class="lbl">¿De dónde sale la mercadería?</label>
+        <div class="seg" style="margin-bottom:.4rem">
+          <button id="mo-tienda" class="on" onclick="setMayOrigen('tienda')">🏬 De mi tienda</button>
+          <button id="mo-prov" onclick="setMayOrigen('proveedora')">📦 La envía la proveedora</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:.5rem" id="may-origen-txt">Sale del stock de la tienda.</div>
+        <div id="may-envio-wrap" style="display:none">
+          <label class="lbl">Envío que cobra la proveedora (lo pagas tú)</label>
+          <input class="fld" id="may-envio" type="number" step="0.5" min="0" value="6.5" oninput="calcTotales()" style="margin-bottom:.4rem">
+          <div class="seg" style="margin-bottom:.5rem"><button id="me-si" class="on" onclick="setMayEnvio(true)">Se lo cobro al mayorista</button><button id="me-no" onclick="setMayEnvio(false)">No se lo cobro</button></div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:.6rem">Precio por mayor automático: camisas $22, polos $18, camisetas cuello redondo $14. Lo demás sale a precio normal; si acordaron otro, usa "$ Precio final".</div>
+        <label class="lbl">¿Cuánto te pagó ahora?</label>
+        <input class="fld" id="may-abono" type="number" step="0.5" min="0" placeholder="0 o vacío = todo queda a crédito" oninput="calcTotales()">
       </div>
       <div id="local-fields" style="margin-bottom:.8rem">
         <label class="lbl">¿Cómo se entrega?</label>
@@ -417,6 +442,7 @@ function fotoPath(tipo,color){
   if(tipo==='camisa_hombre'||tipo==='camisa_mujer'){ const x=FOTO_OX[color]; return x?`camisa-prem-${tipo==='camisa_mujer'?'m':'h'}-${x}`:null; }
   if(tipo==='polo_pique'||tipo==='polo_pique_mujer'){ if(color==='Beige') return 'reales/2026-11/IMG_2381'; const n=FOTO_RL[color]; return n?`polo-rl-${n}`:null; }
   if(tipo==='polo_lacoste'){ const n=FOTO_LC[color]; return n?`polo-lc-${n}`:null; }
+  if(tipo==='perfume'){ const p=productosCache.find(x=>x.tipo==='perfume'&&x.color===color); return p?`perfumes/perfume-${p.sku.slice(3)}-1`:null; }
   if(tipo==='gorra_jinete'){ const g={'Verde':'verde','Azul':'azul','Crema':'crema','Blanco':'blanco','Lila':'lila','Rosado':'rosado','Celeste':'celeste','Verde salvia':'salvia','Gris':'gris'}[color]; return g?`gorras/v2/gorra-${g}-1`:null; }
   if(tipo==='gorra'){ return ['Azul','Beige','Café','Celeste','Gris','Rojo','Vino'].includes(color)?`gorras/gorra-${slugColor(color)}-1`:null; }
   const l=FOTO_LISTA[tipo]; return (l && l[1].includes(color)) ? l[0]+slugColor(color) : null;
@@ -432,6 +458,8 @@ const enTienda = p => Math.max(0,+p.stock||0);   // nunca mostrar stock negativo
 // Gorra del jinete (17 nov 2026): producción propia con Dani, costo $3,25, precio $12 (por mayor $8 con "$ Precio final")
 Object.assign(PRENDA_LABEL,{gorra_jinete:'Gorra Jinete'}); Object.assign(PRENDA_ICON,{gorra_jinete:'🧢',gorra:'🧢'});
 Object.assign(COLOR_HEX,{'Verde':'#2F6E4E','Azul':'#5A6684','Crema':'#EFE6CC','Lila':'#B4ADD8','Verde salvia':'#85938C','Gris':'#6F706F'});
+// Perfumes (17 nov 2026): proveedor aparte, en consignación en la tienda o dropshipping. El "color" es el nombre del perfume.
+Object.assign(PRENDA_LABEL,{perfume:'Perfume'}); Object.assign(PRENDA_ICON,{perfume:'🧴'});
 const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)||{}).nombre) || t;
 const prendaIcon  = t => PRENDA_ICON[t] || (String(t).startsWith('liq_') ? '🏷️' : '👕');
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
@@ -495,7 +523,7 @@ function cambiarPrenda(viejo,nuevo){
   const c=cart.find(x=>x.sku===viejo), p=productosCache.find(x=>x.sku===nuevo); if(!c||!p) return;
   const ya=cart.find(x=>x.sku===nuevo);
   if(ya){ ya.cantidad+=c.cantidad; cart=cart.filter(x=>x.sku!==viejo); }
-  else Object.assign(c,{sku:p.sku,nombre:p.nombre,talla:p.talla,color:p.color,precio_unit:+p.precio_venta,costo_unit:+p.costo});
+  else Object.assign(c,{sku:p.sku,nombre:p.nombre,talla:p.talla,color:p.color,precio_unit:precioLista(p),costo_unit:+p.costo});
   closeModal(); renderCart(); toast('✓ Cambiado a '+p.color);
 }
 function addCart(sku){
@@ -503,7 +531,7 @@ function addCart(sku){
   if(!p) return;
   const ex=cart.find(c=>c.sku===sku);
   if(ex) ex.cantidad++;
-  else cart.push({sku:p.sku, nombre:p.nombre, talla:p.talla, color:p.color, cantidad:1, precio_unit:+p.precio_venta, costo_unit:+p.costo});
+  else cart.push({sku:p.sku, nombre:p.nombre, talla:p.talla, color:p.color, cantidad:1, precio_unit:precioLista(p), costo_unit:+p.costo});
   renderCart();
 }
 function chgQty(sku,d){
@@ -536,6 +564,60 @@ function renderCart(){
   if(cart.length && MODO==='venta') calcTotales();
 }
 let TIPO='local', ENVIO_MODO='cliente', DESC_TIPO='no', COD_ENVIO=COD_ENVIOS[0], ENTREGA='local';
+// ── Mayoristas y proveedores (17 nov 2026) ── precios y proveedores viven en `config` (editables sin tocar código)
+let PM={}, PROVS={}, MAYORISTAS=[], MAY_SEL='', MAY_ORIGEN='tienda', MAY_COBRA_ENVIO=true;
+async function cargarConfigCuentas(){
+  const { data } = await db.from('config').select('clave,valor').in('clave',['precios_mayorista','proveedores']);
+  (data||[]).forEach(r=>{ try{ const v=JSON.parse(r.valor); if(r.clave==='precios_mayorista') PM=v; else PROVS=v; }catch(e){} });
+}
+async function cargarMayoristas(){ const { data } = await db.from('mayoristas').select('*').eq('activo',true).order('nombre'); MAYORISTAS=data||[]; return MAYORISTAS; }
+const precioLista = p => (TIPO==='mayorista' && MODO==='venta' && PM[p.tipo]!=null) ? +PM[p.tipo] : +p.precio_venta;
+function repreciarCarrito(){ cart.forEach(c=>{ const p=productosCache.find(x=>x.sku===c.sku); if(p) c.precio_unit=precioLista(p); }); }
+const provDe = sku => (productosCache.find(p=>p.sku===sku)||{}).proveedor || 'fabiola';
+const provNombre = k => (PROVS[k]&&PROVS[k].nombre) || ({fabiola:'Fabiola · ropa',perfumes:'Proveedor de perfumes'}[k]) || k;
+const esLocalVenta = () => TIPO==='local' || (TIPO==='mayorista' && MAY_ORIGEN==='tienda');
+function pintarMaySel(){
+  const sel=document.getElementById('may-sel'); if(!sel) return;
+  sel.innerHTML='<option value="">Elige el mayorista…</option>'+MAYORISTAS.map(m=>`<option value="${m.id}" ${m.id===MAY_SEL?'selected':''}>${m.nombre}${m.ciudad?' · '+m.ciudad:''}</option>`).join('');
+  pintarMaySaldo();
+}
+async function pintarMaySaldo(){
+  const el=document.getElementById('may-saldo'); if(!el) return;
+  if(!MAY_SEL){ el.textContent=''; return; }
+  const s=await saldoMayorista(MAY_SEL);
+  el.innerHTML = s>0.009 ? `Ya te debe <b style="color:var(--yellow)">${money(s)}</b> de entregas anteriores.` : 'No te debe nada de antes.';
+}
+async function saldoMayorista(id){
+  const [{data:vs},{data:ps}] = await Promise.all([
+    db.from('ventas').select('total').eq('mayorista_id',id).eq('anulada',false),
+    db.from('mayorista_pagos').select('monto').eq('mayorista_id',id)]);
+  return (vs||[]).reduce((a,v)=>a+(+v.total||0),0) - (ps||[]).reduce((a,p)=>a+(+p.monto||0),0);
+}
+function setMayOrigen(o){
+  MAY_ORIGEN=o;
+  document.getElementById('mo-tienda').classList.toggle('on',o==='tienda');
+  document.getElementById('mo-prov').classList.toggle('on',o==='proveedora');
+  document.getElementById('may-envio-wrap').style.display = o==='proveedora'?'block':'none';
+  document.getElementById('may-origen-txt').textContent = o==='tienda' ? 'Sale del stock de la tienda.' : 'La proveedora la despacha: se le paga en la liquidación (prenda + envío).';
+  calcTotales();
+}
+function setMayEnvio(b){ MAY_COBRA_ENVIO=b; document.getElementById('me-si').classList.toggle('on',b); document.getElementById('me-no').classList.toggle('on',!b); calcTotales(); }
+function nuevoMayorista(desdeVenta){
+  showModal(`<h3 style="margin:0 0 .6rem">➕ Nuevo mayorista</h3>
+    <input class="fld" id="nm-nombre" placeholder="Nombre" style="margin-bottom:.5rem">
+    <div class="grid2" style="margin-bottom:.5rem"><input class="fld" id="nm-tel" placeholder="Teléfono 09…"><input class="fld" id="nm-ciudad" placeholder="Ciudad"></div>
+    <input class="fld" id="nm-notas" placeholder="Nota (opcional)" style="margin-bottom:.7rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="guardarMayorista(${desdeVenta?'true':'false'})">Guardar</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="closeModal()">Cancelar</button>`);
+}
+async function guardarMayorista(desdeVenta){
+  const nombre=(document.getElementById('nm-nombre').value||'').trim(); if(!nombre){ toast('Escribe el nombre'); return; }
+  const row={ nombre, telefono:(document.getElementById('nm-tel').value||'').trim()||null, ciudad:(document.getElementById('nm-ciudad').value||'').trim()||null, notas:(document.getElementById('nm-notas').value||'').trim()||null };
+  const { data, error } = await db.from('mayoristas').insert(row).select().single();
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('✓ Mayorista guardado'); await cargarMayoristas();
+  if(desdeVenta){ MAY_SEL=data.id; pintarMaySel(); } else renderCuentas();
+}
 function setEntrega(e){
   ENTREGA=e;
   document.getElementById('en-local').classList.toggle('on',e==='local');
@@ -562,6 +644,10 @@ function setTipo(t){
   document.getElementById('t-local').classList.toggle('on',t==='local');
   document.getElementById('t-drop').classList.toggle('on',t==='dropshipping');
   document.getElementById('t-cod').classList.toggle('on',t==='contraentrega');
+  const tm=document.getElementById('t-may'); if(tm) tm.classList.toggle('on',t==='mayorista');
+  document.getElementById('may-fields').style.display = t==='mayorista'?'block':'none';
+  if(t==='mayorista'){ cargarMayoristas().then(pintarMaySel); setMayOrigen(MAY_ORIGEN); }
+  repreciarCarrito(); renderCart();
   // dropshipping y contra entrega piden dirección; cada uno con su bloque de envío
   document.getElementById('local-fields').style.display = t==='local'?'block':'none';
   document.getElementById('drop-fields').style.display = (t==='dropshipping'||t==='contraentrega')?'block':'none';
@@ -588,6 +674,9 @@ function calcTotales(){
     // El costo real de Pardux se conoce al generar la guía; hasta entonces se asume igual
     // a lo cobrado (neutro) y la ganancia se muestra como estimada.
     envioCobrado = COD_ENVIO; costoEnvio = COD_ENVIO;
+  } else if(TIPO==='mayorista' && MAY_ORIGEN==='proveedora'){
+    costoEnvio = Math.max(0, parseFloat((document.getElementById('may-envio')||{}).value)||0);
+    envioCobrado = MAY_COBRA_ENVIO ? costoEnvio : 0;
   }
   // Descuento: por porcentaje de los productos, o "precio final" = TOTAL que paga el
   // cliente (envío incluido). El precio final siempre se respeta tal cual lo escribe
@@ -609,7 +698,9 @@ function calcTotales(){
       <div class="totline"><span class="muted">Costo Pardux</span><span class="muted">se registra al cargar la guía</span></div>`:''}
     ${descuentoMonto>0?`<div class="totline"><span class="muted">Descuento ${descTipo==='porcentaje'?'('+descVal+'%)':''}</span><span style="color:var(--red)">-${money(descuentoMonto)}</span></div>`:''}
     ${descuentoMonto<0?`<div class="totline"><span class="muted">Ajuste por precio final</span><span>+${money(-descuentoMonto)}</span></div>`:''}
+    ${TIPO==='mayorista'&&MAY_ORIGEN==='proveedora'?`<div class="totline"><span class="muted">Envío ${MAY_COBRA_ENVIO?'que le cobras':'(lo asumes tú)'}</span><span>${MAY_COBRA_ENVIO?money(envioCobrado):'-'+money(costoEnvio)}</span></div>`:''}
     <div class="totline big"><span>${TIPO==='contraentrega'?'Total que cobra Pardux al entregar':'Total a cobrar'}</span><span>${money(total)}</span></div>
+    ${TIPO==='mayorista'?(()=>{ const ab=Math.min(total,Math.max(0,parseFloat((document.getElementById('may-abono')||{}).value)||0)); return `<div class="totline"><span class="muted">Te pagó ahora</span><span>${money(ab)}</span></div><div class="totline"><span>Queda debiendo de esta entrega</span><b style="color:var(--yellow)">${money(total-ab)}</b></div>`; })():''}
     ${ES_ADMIN?`<div class="totline"><span class="muted">Tu ganancia${TIPO==='contraentrega'?' (estimada, antes del costo Pardux)':''}</span><span class="gain">${money(ganancia)}</span></div>`:''}`;
   return {subtotal,costo,descuentoMonto,descTipo,descVal,costoEnvio,envioCobrado,total,ganancia};
 }
@@ -624,7 +715,10 @@ async function registrarVenta(){
   // Venta en el local de una prenda que el sistema NO tiene en tienda: casi siempre es otro color/talla mal elegido.
   // Se frena y se muestran las que sí hay; solo sigue si la vendedora confirma que es esa.
   let sinStockNota=null;
-  if(TIPO==='local'){
+  const esMay = TIPO==='mayorista';
+  const may = esMay ? MAYORISTAS.find(m=>m.id===MAY_SEL) : null;
+  if(esMay && !may){ toast('Elige a qué mayorista se le entrega'); return; }
+  if(esLocalVenta()){
     const faltan=cart.filter(c=>{ const p=productosCache.find(x=>x.sku===c.sku); return p && enTienda(p) < c.cantidad; });
     if(faltan.length && !window._okSinStock){ avisoSinStock(faltan); return; }
     if(faltan.length) sinStockNota='⚠ Vendida sin stock en el sistema: '+faltan.map(c=>c.sku).join(', ');
@@ -635,7 +729,7 @@ async function registrarVenta(){
   const esCOD = TIPO==='contraentrega';
   const conEnvio = TIPO==='dropshipping' || esCOD;
   const esEntrega = TIPO==='local' && ENTREGA==='entrega_quito';
-  const zona = TIPO==='dropshipping'? document.getElementById('zona').value : (esCOD ? 'pardux' : (esEntrega ? 'entrega_quito' : null));
+  const zona = TIPO==='dropshipping'? document.getElementById('zona').value : (esCOD ? 'pardux' : (esEntrega ? 'entrega_quito' : (esMay && MAY_ORIGEN==='proveedora' ? 'provincia' : null)));
   const ciudad = document.getElementById('c-ciudad').value||(esEntrega?'Quito':null);
   const direccion = conEnvio ? (document.getElementById('c-direccion').value||null) : null;
   const telefono = document.getElementById('c-tel').value||null;
@@ -646,25 +740,29 @@ async function registrarVenta(){
   }
   const venta = {
     tipo:TIPO, vendedor:VENDEDOR,
-    cliente_nombre: document.getElementById('c-nombre').value||null,
-    cliente_telefono: telefono, cedula,
-    ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
+    cliente_nombre: esMay ? may.nombre : (document.getElementById('c-nombre').value||null),
+    cliente_telefono: esMay ? (may.telefono||telefono) : telefono, cedula,
+    ciudad: esMay ? (ciudad||may.ciudad||null) : ciudad, zona_envio:zona, costo_envio:t.costoEnvio, envio_cobrado:t.envioCobrado,
     descuento_tipo:t.descTipo, descuento_valor:t.descVal, descuento_monto:t.descuentoMonto,
     subtotal:t.subtotal, total:t.total, costo_productos:t.costo, ganancia:t.ganancia,
     metodo_pago: esCOD ? 'Contra entrega' : document.getElementById('pago').value,
-    notas: [direccion,sinStockNota].filter(Boolean).join(' · ')||null  // dirección exacta (+ aviso si se vendió sin stock)
+    notas: [esMay?('🤝 Mayorista · '+(MAY_ORIGEN==='tienda'?'de la tienda':'la envía la proveedora')):null, direccion, sinStockNota].filter(Boolean).join(' · ')||null  // dirección exacta (+ aviso si se vendió sin stock)
   };
+  const abono = esMay ? Math.min(t.total, Math.max(0, parseFloat(document.getElementById('may-abono').value)||0)) : 0;
+  if(esMay){ venta.mayorista_id = may.id; if(!(abono>0)) venta.metodo_pago='Crédito'; }
   if(esCOD){ venta.estado_envio='por_despachar'; venta.estado_envio_at=new Date().toISOString(); }
   const { data:vRow, error } = await db.from('ventas').insert(venta).select().single();
   if(error){ toast('Error: '+error.message); btn.disabled=false; btn.textContent='✅ Registrar venta'; return; }
-  const esLocal = TIPO==='local';
+  const esLocal = esLocalVenta();
   const items = cart.map(c=>({venta_id:vRow.id, sku:c.sku, nombre:c.nombre, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit, es_local:esLocal}));
   await db.from('venta_items').insert(items);
   // datos para compartir (incluyen COLOR, que no se guarda en venta_items)
   const shareItems = cart.map(c=>({nombre:c.nombre, color:c.color, talla:c.talla, cantidad:c.cantidad, precio_unit:c.precio_unit, costo_unit:c.costo_unit}));
   venta.direccion = direccion;
   const folio = vRow.folio;
-  await sincronizarCRM(venta, shareItems, folio);
+  if(esMay){
+    if(abono>0) await db.from('mayorista_pagos').insert({ mayorista_id:may.id, monto:abono, metodo:document.getElementById('pago').value, nota:'Pago al recibir la entrega #'+folio, registrado_por:VENDEDOR });
+  } else await sincronizarCRM(venta, shareItems, folio);
   const refId = (document.getElementById('c-ref')||{}).value;
   if(refId){
     try{ await revRpc('rev_admin_referido',{p_pin:staffPin(), p_vendedor:refId, p_venta_id:vRow.id, p_quien:VENDEDOR}); }
@@ -672,6 +770,7 @@ async function registrarVenta(){
   }
   cart=[]; TIPO='local'; ENVIO_MODO='cliente'; DESC_TIPO='no'; COD_ENVIO=COD_ENVIOS[0]; ENTREGA='local';
   if(esCOD) actualizarBadgeEnvios();
+  if(esMay){ MAY_SEL=''; MAY_ORIGEN='tienda'; MAY_COBRA_ENVIO=true; toast(`✅ Entrega #${folio} a ${may.nombre}: ${money(t.total)} · debe ${money(t.total-abono)}`); renderVender(); return; }
   // Asesor → pantalla para compartir a Homero. Admin → solo confirma.
   if(!ES_ADMIN) mostrarCompartir(folio, venta, shareItems);
   else { toast('✅ Venta #'+folio+' registrada'); renderVender(); }
@@ -1539,16 +1638,28 @@ function setModo(m){ if(m===MODO) return; MODO=m; cart=[]; return renderVender()
 async function irADropshipping(){ await setModo('venta'); setTipo('dropshipping'); }
 const lunesDe = d => { const x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; };
 const fechaCorta = d => new Date(d).toLocaleDateString('es-EC',{day:'numeric',month:'short'});
+let STOCK_CONSIG=null;   // null = automático (perfumes → consignación)
+const provsCarrito = () => [...new Set(cart.map(c=>provDe(c.sku)))];
+const stockConsig = () => STOCK_CONSIG!==null ? STOCK_CONSIG : provsCarrito().includes('perfumes');
+const montoPedido = p => p.consignacion ? (+p.costo_envio||0) : (+p.total||0);   // consignación: solo se debe el envío al llegar
 function stockTotales(){
   const costo = Math.round(cart.reduce((s,c)=>s+c.costo_unit*c.cantidad,0)*100)/100;
   const envio = Math.max(0, +STOCK_ENVIO||0);
-  return { costo, envio, total: Math.round((costo+envio)*100)/100, unidades: cart.reduce((s,c)=>s+c.cantidad,0) };
+  const consig = stockConsig();
+  return { costo, envio, consig, total: Math.round(((consig?0:costo)+envio)*100)/100, unidades: cart.reduce((s,c)=>s+c.cantidad,0) };
 }
 function pintarStockCheckout(){
   const el=document.getElementById('stock-checkout'); if(!el) return;
   const t=stockTotales();
   const notas=(document.getElementById('stock-notas')||{}).value||'';
+  const provs=provsCarrito();
   el.innerHTML = `
+    <div class="muted" style="font-size:12px;margin-bottom:.5rem">Proveedor: <b>${provs.map(provNombre).join(' + ')}</b>${provs.length>1?' <span style="color:var(--yellow)">· registra cada proveedor por separado</span>':''}</div>
+    <label class="lbl">¿Cómo llega?</label>
+    <div class="seg" style="margin-bottom:.6rem">
+      <button class="${t.consig?'':'on'}" onclick="STOCK_CONSIG=false;pintarStockCheckout()">🛒 Compra<br><small style="font-weight:400;font-size:11px">se paga en la semana</small></button>
+      <button class="${t.consig?'on':''}" onclick="STOCK_CONSIG=true;pintarStockCheckout()">🤝 Consignación<br><small style="font-weight:400;font-size:11px">se paga cuando se venda</small></button>
+    </div>
     <label class="lbl">¿Ya está en la tienda?</label>
     <div class="seg" style="margin-bottom:.6rem">
       <button class="${STOCK_LLEGO?'on':''}" onclick="stockLlego(true)">✅ Ya entró</button>
@@ -1571,10 +1682,10 @@ function pintarStockTot(){
   const el=document.getElementById('stock-tot'); if(!el) return;
   const t=stockTotales();
   el.innerHTML = `
-    <div class="totline"><span class="muted">${t.unidades} prenda(s) a costo</span><span>${money(t.costo)}</span></div>
+    <div class="totline"><span class="muted">${t.unidades} prenda(s) a costo${t.consig?' (se pagan al venderse)':''}</span><span>${money(t.costo)}</span></div>
     <div class="totline"><span class="muted">Envío</span><span>${money(t.envio)}</span></div>
-    <div class="totline big"><span>A pagar a la proveedora</span><span>${money(t.total)}</span></div>
-    <div class="muted" style="font-size:12px">Se suma a lo que se le paga en la semana. ${STOCK_LLEGO?'Las prendas entran al inventario al guardar.':'Las prendas entran al inventario cuando marques que llegaron.'}</div>`;
+    <div class="totline big"><span>${t.consig?'A pagar ahora (solo envío)':'A pagar a la proveedora'}</span><span>${money(t.total)}</span></div>
+    <div class="muted" style="font-size:12px">${t.consig?'En consignación: cada prenda se le paga a su costo cuando se venda (sale en Cuentas).':'Se suma a lo que se le paga en la semana.'} ${STOCK_LLEGO?'Las prendas entran al inventario al guardar.':'Las prendas entran al inventario cuando marques que llegaron.'}</div>`;
 }
 async function registrarPedidoStock(){
   if(!cart.length) return;
@@ -1583,7 +1694,9 @@ async function registrarPedidoStock(){
   const t=stockTotales(), notas=(document.getElementById('stock-notas').value||'').trim()||null;
   const esHoy = STOCK_FECHA===fechaInput(new Date());
   const fecha = esHoy ? new Date().toISOString() : new Date(STOCK_FECHA+'T12:00:00').toISOString();
-  const { data:ped, error } = await db.from('pedidos_stock').insert({ fecha, vendedor:VENDEDOR, costo_productos:t.costo, costo_envio:t.envio, total:t.total, notas }).select().single();
+  const provs=provsCarrito();
+  if(provs.length>1){ toast('Hay prendas de dos proveedores: registra cada uno por separado'); btn.disabled=false; btn.textContent=txt; return; }
+  const { data:ped, error } = await db.from('pedidos_stock').insert({ fecha, vendedor:VENDEDOR, costo_productos:t.costo, costo_envio:t.envio, total:t.consig?t.envio:Math.round((t.costo+t.envio)*100)/100, notas, proveedor:provs[0]||'fabiola', consignacion:t.consig }).select().single();
   if(error){ toast(/pedidos_stock/.test(error.message)?'Falta activar pedidos de stock en Supabase (schema-v5)':'Error: '+error.message); btn.disabled=false; btn.textContent=txt; return; }
   const items = cart.map(c=>({ pedido_id:ped.id, sku:c.sku, nombre:c.nombre, color:c.color, talla:c.talla, cantidad:c.cantidad, costo_unit:c.costo_unit }));
   const { error:e2 } = await db.from('pedidos_stock_items').insert(items);
@@ -1594,8 +1707,8 @@ async function registrarPedidoStock(){
     if(e3) toast('No se sumó al stock. Quedó en camino: márcalo en "Llegó a la tienda"');
     else { entro=true; if(!esHoy) await db.from('pedidos_stock').update({ recibido_at:fecha }).eq('id',ped.id); }
   }
-  const msg = `${entro?'📥 INGRESO DE STOCK':'📥 PEDIDO PARA STOCK'} #${ped.folio}\n📅 ${fechaCorta(fecha)} · ${VENDEDOR}\n\n${lineasStock(items)}\n\n💵 *A pagar a proveedora: ${money(t.total)}*\n   Prendas ${money(t.costo)} + Envío ${money(t.envio)}${notas?'\n\n📝 '+notas:''}\n\n🏬 Va a la tienda (no es venta)`;
-  cart=[]; STOCK_ENVIO=ENVIO.provincia; STOCK_LLEGO=true; STOCK_FECHA=fechaInput(new Date());
+  const msg = `${entro?'📥 INGRESO DE STOCK':'📥 PEDIDO PARA STOCK'} #${ped.folio}${t.consig?' · EN CONSIGNACIÓN':''}\n📅 ${fechaCorta(fecha)} · ${VENDEDOR}\n\n${lineasStock(items)}\n\n${t.consig?`🤝 Se paga cada prenda cuando se venda (a costo: ${money(t.costo)} en total)\n💵 *Ahora: envío ${money(t.envio)}*`:`💵 *A pagar a proveedora: ${money(t.total)}*\n   Prendas ${money(t.costo)} + Envío ${money(t.envio)}`}${notas?'\n\n📝 '+notas:''}\n\n🏬 Va a la tienda (no es venta)`;
+  cart=[]; STOCK_ENVIO=ENVIO.provincia; STOCK_LLEGO=true; STOCK_FECHA=fechaInput(new Date()); STOCK_CONSIG=null;
   document.getElementById('view').innerHTML = `
     <div class="card" style="text-align:center;margin-top:1.5rem">
       <div style="font-size:52px">📥</div>
@@ -1633,9 +1746,9 @@ async function renderStockLista(){
         <button class="btn btn-ghost" onclick="anularStock('${p.id}')">✖ No llegó / anular</button>
       </div></div>`).join(''):'<div class="empty" style="padding:1rem">No hay pedidos en camino</div>'}
     <h2 class="page" style="margin-top:1.4rem">💵 Por pagar a la proveedora <span class="muted" style="font-size:12px">· solo lo que entró a stock</span></h2>
-    ${Object.keys(semanas).length?Object.keys(semanas).sort().map(k=>{ const ls=semanas[k], tot=ls.reduce((s,p)=>s+(+p.total||0),0), ini=new Date(k), fin=new Date(ini); fin.setDate(fin.getDate()+6);
+    ${Object.keys(semanas).length?Object.keys(semanas).sort().map(k=>{ const ls=semanas[k], tot=ls.reduce((s,p)=>s+montoPedido(p),0), ini=new Date(k), fin=new Date(ini); fin.setDate(fin.getDate()+6);
       return `<div class="card"><div class="row" style="justify-content:space-between"><b>Semana ${fechaCorta(ini)} – ${fechaCorta(fin)}</b><b style="color:var(--gold)">${money(tot)}</b></div>
-        <div class="muted" style="font-size:12px;margin-top:.3rem">${ls.map(p=>`<b>#${p.folio}</b> · ${fechaCorta(p.fecha)} · ${money(p.total)}${p.estado==='recibido'?' · entró':' · en camino'}<br>${detalle(p)}`).join('<br>')}</div>
+        <div class="muted" style="font-size:12px;margin-top:.3rem">${ls.map(p=>`<b>#${p.folio}</b> · ${fechaCorta(p.fecha)} · ${money(montoPedido(p))}${p.consignacion?' · consignación (solo envío)':''}${p.proveedor&&p.proveedor!=='fabiola'?' · '+provNombre(p.proveedor):''}${p.estado==='recibido'?' · entró':' · en camino'}<br>${detalle(p)}`).join('<br>')}</div>
         <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="compartirSemanaStock('${k}')">📲 Enviar referencia por WhatsApp</button>
         ${ES_ADMIN?`<button class="btn btn-gold" style="width:100%;margin-top:.6rem" onclick="pagarSemanaStock('${k}')">💸 Ya le pagué ${money(tot)}</button>`:''}</div>`; }).join('')
       :'<div class="empty" style="padding:1rem">Nada pendiente de pago</div>'}
@@ -1643,7 +1756,7 @@ async function renderStockLista(){
 }
 function compartirSemanaStock(k){
   const ls=(window._stockCache||[]).filter(p=>p.estado!=='anulado' && !p.pagado_at && lunesDe(p.fecha).toISOString()===k);
-  const tot=ls.reduce((s,p)=>s+(+p.total||0),0), ini=new Date(k), fin=new Date(ini); fin.setDate(fin.getDate()+6);
+  const tot=ls.reduce((s,p)=>s+montoPedido(p),0), ini=new Date(k), fin=new Date(ini); fin.setDate(fin.getDate()+6);
   const bloques=ls.map(p=>`#${p.folio} · ${fechaCorta(p.fecha)}${p.estado==='recibido'?'':' (en camino)'}\n${lineasStock((window._stockItems||[]).filter(i=>i.pedido_id===p.id))}\nPrendas ${money(p.costo_productos)} + Envío ${money(p.costo_envio)} = ${money(p.total)}`).join('\n\n');
   window.open('https://wa.me/?text='+encodeURIComponent(`📥 MERCADERÍA QUE ENTRÓ A LA TIENDA\nSemana ${fechaCorta(ini)} – ${fechaCorta(fin)}\n\n${bloques}\n\n💵 *Total a pagar: ${money(tot)}*`),'_blank');
 }
@@ -1665,11 +1778,149 @@ async function anularStock(id){
 async function pagarSemanaStock(k){
   const ls=(window._stockCache||[]).filter(p=>p.estado!=='anulado' && !p.pagado_at && lunesDe(p.fecha).toISOString()===k);
   if(!ls.length) return;
-  const tot=ls.reduce((s,p)=>s+(+p.total||0),0);
+  const tot=ls.reduce((s,p)=>s+montoPedido(p),0);
   if(!confirm(`¿Ya le pagaste ${money(tot)} a la proveedora por ${ls.length} pedido(s) de stock?`)) return;
   const { error } = await db.from('pedidos_stock').update({ pagado_at:new Date().toISOString(), pagado_por:VENDEDOR }).in('id', ls.map(p=>p.id));
   if(error){ toast('Error: '+error.message); return; }
   toast('💸 Pago registrado'); renderStockLista();
+}
+
+// ════════════ CUENTAS (admin) — me deben (mayoristas) y debo (proveedores) ════════════
+// Mayorista: cada entrega es una venta tipo 'mayorista' (a crédito o con pago) y los pagos van a mayorista_pagos.
+//   Saldo = entregas − pagos. Si sale de la tienda descuenta stock; si la envía la proveedora, se le debe a ella.
+// Proveedor: desde la fecha "desde" de config.proveedores se suma lo que se le debe:
+//   · prendas que ella despachó (dropshipping, contra entrega, mayorista enviado) a su costo + el envío
+//   · si consigna_local (perfumes): también lo vendido en el local, porque está en consignación
+//   · pedidos de stock: compra = total; consignación = solo el envío
+//   y se restan los pagos de proveedor_pagos. El préstamo de Fabiola (pedido 6) se lleva aparte.
+let CU={};
+async function renderCuentas(){
+  const v=document.getElementById('view'); v.innerHTML='<div class="empty">Cargando cuentas…</div>';
+  await Promise.all([cargarConfigCuentas(), loadProductos(), cargarMayoristas()]);
+  const desdeMin = Object.values(PROVS).map(x=>x.desde).filter(Boolean).sort()[0] || '2026-11-10';
+  const [{data:vmay},{data:mpag},{data:vprov},{data:peds},{data:ppag}] = await Promise.all([
+    db.from('ventas').select('id,folio,fecha,total,mayorista_id,notas,zona_envio,costo_envio').not('mayorista_id','is',null).eq('anulada',false).order('fecha',{ascending:false}),
+    db.from('mayorista_pagos').select('*').order('fecha',{ascending:false}),
+    db.from('ventas').select('id,folio,fecha,tipo,cliente_nombre,costo_envio,zona_envio').eq('anulada',false).gte('fecha',desdeMin+'T00:00:00-05:00').order('fecha'),
+    db.from('pedidos_stock').select('*').neq('estado','anulado').gte('fecha',desdeMin+'T00:00:00-05:00').order('fecha'),
+    db.from('proveedor_pagos').select('*').order('fecha',{ascending:false})]);
+  const ids=[...new Set([...(vmay||[]).map(x=>x.id),...(vprov||[]).map(x=>x.id)])];
+  let its=[]; for(let i=0;i<ids.length;i+=150){ const {data}=await db.from('venta_items').select('*').in('venta_id',ids.slice(i,i+150)); its=its.concat(data||[]); }
+  const itemsDe=id=>its.filter(i=>i.venta_id===id);
+  const nomCorto=i=>{ const p=productosCache.find(x=>x.sku===i.sku)||{}; return `${i.cantidad>1?i.cantidad+'x ':''}${(i.nombre||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} · ${p.color||''} · ${i.talla||''}`; };
+  // ── mayoristas
+  const mays=MAYORISTAS.map(m=>{
+    const ent=(vmay||[]).filter(x=>x.mayorista_id===m.id), pag=(mpag||[]).filter(x=>x.mayorista_id===m.id);
+    const tE=ent.reduce((a,x)=>a+(+x.total||0),0), tP=pag.reduce((a,x)=>a+(+x.monto||0),0);
+    return {m,ent,pag,tE,tP,saldo:Math.round((tE-tP)*100)/100};
+  });
+  // ── proveedores
+  const desdeDe=k=>((PROVS[k]||{}).desde||desdeMin)+'T00:00:00-05:00';
+  const provs={}; const P=k=>(provs[k]=provs[k]||{lineas:[],pedidos:[],pagos:[],cargos:0,pagado:0});
+  (vprov||[]).forEach(vt=>{
+    let envioDe=null; const porProv={};
+    itemsDe(vt.id).forEach(i=>{
+      const k=provDe(i.sku); if(!PROVS[k]) return;
+      if(new Date(vt.fecha)<new Date(desdeDe(k))) return;
+      const debe = !i.es_local || PROVS[k].consigna_local;
+      if(!debe) return;
+      (porProv[k]=porProv[k]||[]).push(i);
+      if(!i.es_local && !envioDe) envioDe=k;
+    });
+    const conEnvio = (vt.tipo==='dropshipping' || (vt.tipo==='mayorista' && vt.zona_envio==='provincia')) && (+vt.costo_envio>0);
+    Object.entries(porProv).forEach(([k,ls])=>{
+      const costo=ls.reduce((a,i)=>a+(+i.costo_unit||0)*i.cantidad,0), env=(conEnvio&&envioDe===k)?(+vt.costo_envio||0):0;
+      P(k).lineas.push({vt,ls,costo,env,monto:costo+env}); P(k).cargos+=costo+env;
+    });
+  });
+  (peds||[]).forEach(pd=>{ const k=pd.proveedor||'fabiola'; if(!PROVS[k]||pd.pagado_at) return; if(new Date(pd.fecha)<new Date(desdeDe(k))) return; const mt=montoPedido(pd); if(mt<=0) return; P(k).pedidos.push({pd,monto:mt}); P(k).cargos+=mt; });
+  (ppag||[]).forEach(pg=>{ if(!PROVS[pg.proveedor]) return; if(new Date(pg.fecha)<new Date(desdeDe(pg.proveedor))) return; P(pg.proveedor).pagos.push(pg); P(pg.proveedor).pagado+=(+pg.monto||0); });
+  Object.keys(PROVS).forEach(k=>P(k));
+  CU={mays,provs,itemsDe,nomCorto};
+  const totMe=mays.reduce((a,x)=>a+Math.max(0,x.saldo),0), totDebo=Object.values(provs).reduce((a,x)=>a+(x.cargos-x.pagado),0);
+  v.innerHTML = `
+    <h2 class="page">Cuentas</h2>
+    <div class="grid2" style="margin-bottom:1rem">
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Te deben</div><div style="font-size:22px;font-weight:700;color:var(--green)">${money(totMe)}</div></div>
+      <div class="card" style="margin:0;text-align:center"><div class="muted" style="font-size:12px">Debes a proveedores</div><div style="font-size:22px;font-weight:700;color:var(--yellow)">${money(totDebo)}</div></div>
+    </div>
+    <div class="row" style="justify-content:space-between;align-items:center"><h2 class="page" style="margin:0">🤝 Mayoristas · te deben</h2><button class="btn btn-ghost" onclick="nuevoMayorista(false)">➕ Agregar</button></div>
+    ${mays.length?mays.map((x,ix)=>`<div class="card" style="margin-top:.6rem">
+      <div class="row" style="justify-content:space-between"><b>${x.m.nombre}</b><b style="color:${x.saldo>0.009?'var(--yellow)':'var(--green)'}">${x.saldo>0.009?'Debe '+money(x.saldo):'Al día'}</b></div>
+      <div class="muted" style="font-size:12px">${[x.m.telefono,x.m.ciudad].filter(Boolean).join(' · ')}</div>
+      <div class="totline" style="margin-top:.4rem"><span class="muted">Entregado</span><span>${money(x.tE)}</span></div>
+      <div class="totline"><span class="muted">Pagado</span><span>${money(x.tP)}</span></div>
+      <details style="margin-top:.4rem"><summary class="muted" style="font-size:12px;cursor:pointer">Ver entregas y pagos</summary>
+        <div style="font-size:12px;margin-top:.4rem">${[...x.ent.map(e=>({f:e.fecha,h:`📦 <b>#${e.folio}</b> · ${fechaCorta(e.fecha)} · <b>${money(e.total)}</b>${/proveedora/.test(e.notas||'')?' · la envió la proveedora':''}<br><span class="muted">${itemsDe(e.id).map(nomCorto).join('<br>')}</span>`})),
+          ...x.pag.map(pg=>({f:pg.fecha,h:`💵 Pago · ${fechaCorta(pg.fecha)} · <b style="color:var(--green)">${money(pg.monto)}</b>${pg.metodo?' · '+pg.metodo:''}${pg.nota?' · '+pg.nota:''}`}))]
+          .sort((a,b)=>new Date(b.f)-new Date(a.f)).map(z=>`<div style="padding:.35rem 0;border-bottom:1px solid var(--border)">${z.h}</div>`).join('')||'<span class="muted">Sin movimientos</span>'}</div></details>
+      <div class="grid2" style="margin-top:.6rem">
+        <button class="btn btn-green" onclick="pagoMayorista(${ix})">💵 Registrar pago</button>
+        <button class="btn btn-gold" onclick="entregaMayorista(${ix})">📦 Nueva entrega</button>
+      </div>
+      ${x.m.telefono?`<button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="estadoCuentaMayorista(${ix})">📲 Enviarle su estado de cuenta</button>`:''}
+    </div>`).join(''):'<div class="empty" style="padding:1rem">Aún no hay mayoristas. Toca ➕ Agregar.</div>'}
+    <h2 class="page" style="margin-top:1.4rem">💸 Proveedores · les debes</h2>
+    ${Object.entries(provs).map(([k,x])=>{ const saldo=Math.round((x.cargos-x.pagado)*100)/100; return `<div class="card" style="margin-top:.6rem">
+      <div class="row" style="justify-content:space-between"><b>${provNombre(k)}</b><b style="color:${saldo>0.009?'var(--yellow)':'var(--green)'}">${saldo>0.009?'Debes '+money(saldo):'Al día'}</b></div>
+      <div class="muted" style="font-size:12px">Cuenta desde el ${fechaCorta(desdeDe(k))}${PROVS[k].consigna_local?' · en consignación: también cuenta lo vendido en la tienda':''}</div>
+      <div class="totline" style="margin-top:.4rem"><span class="muted">Ventas y pedidos</span><span>${money(x.cargos)}</span></div>
+      <div class="totline"><span class="muted">Pagado</span><span>${money(x.pagado)}</span></div>
+      <details style="margin-top:.4rem"><summary class="muted" style="font-size:12px;cursor:pointer">Ver detalle (${x.lineas.length} venta(s), ${x.pedidos.length} pedido(s))</summary>
+        <div style="font-size:12px;margin-top:.4rem">
+        ${x.lineas.map(l=>`<div style="padding:.35rem 0;border-bottom:1px solid var(--border)"><b>#${l.vt.folio}</b> · ${fechaCorta(l.vt.fecha)} · ${l.vt.cliente_nombre||'sin nombre'} · <b>${money(l.monto)}</b><br><span class="muted">${l.ls.map(nomCorto).join('<br>')}${l.env?'<br>Envío '+money(l.env):''}</span></div>`).join('')}
+        ${x.pedidos.map(o=>`<div style="padding:.35rem 0;border-bottom:1px solid var(--border)">📥 <b>Stock #${o.pd.folio}</b> · ${fechaCorta(o.pd.fecha)} · <b>${money(o.monto)}</b>${o.pd.consignacion?' · consignación (envío)':''}</div>`).join('')}
+        ${x.pagos.map(pg=>`<div style="padding:.35rem 0;border-bottom:1px solid var(--border)">💸 Pago · ${fechaCorta(pg.fecha)} · <b style="color:var(--green)">${money(pg.monto)}</b>${pg.nota?' · '+pg.nota:''}</div>`).join('')}
+        ${!(x.lineas.length+x.pedidos.length+x.pagos.length)?'<span class="muted">Sin movimientos</span>':''}</div></details>
+      <div class="grid2" style="margin-top:.6rem">
+        <button class="btn btn-gold" onclick="pagoProveedor('${k}')">💸 Registrar pago</button>
+        <button class="btn btn-ghost" onclick="detalleProveedor('${k}')">📲 Enviar detalle</button>
+      </div></div>`; }).join('')}
+    <div class="muted" style="font-size:12px;margin:1rem 0 2rem">El préstamo de ropa de Fabiola (stock #6) no entra aquí: se liquida aparte con el conteo de la tienda.</div>`;
+}
+function formPago(titulo, sub, onSave){
+  showModal(`<h3 style="margin:0 0 .3rem">${titulo}</h3><div class="muted" style="font-size:13px;margin-bottom:.7rem">${sub}</div>
+    <input class="fld" id="fp-monto" type="number" step="0.5" min="0" placeholder="Monto $" style="margin-bottom:.5rem">
+    <div class="grid2" style="margin-bottom:.5rem"><select class="fld" id="fp-metodo"><option>Transferencia</option><option>Efectivo</option><option>Otro</option></select><input class="fld" id="fp-fecha" type="date" value="${fechaInput(new Date())}" max="${fechaInput(new Date())}"></div>
+    <input class="fld" id="fp-nota" placeholder="Nota (opcional)" style="margin-bottom:.7rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="${onSave}">Guardar pago</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="closeModal()">Cancelar</button>`);
+}
+function leerPago(){
+  const monto=Math.round((parseFloat(document.getElementById('fp-monto').value)||0)*100)/100;
+  const f=document.getElementById('fp-fecha').value, esHoy=f===fechaInput(new Date());
+  return { monto, metodo:document.getElementById('fp-metodo').value, nota:(document.getElementById('fp-nota').value||'').trim()||null,
+    fecha: esHoy? new Date().toISOString() : new Date(f+'T12:00:00').toISOString() };
+}
+function pagoMayorista(ix){ const x=CU.mays[ix]; formPago('💵 Pago de '+x.m.nombre, x.saldo>0.009?'Debe '+money(x.saldo):'Está al día', `guardarPagoMayorista(${ix})`); }
+async function guardarPagoMayorista(ix){
+  const x=CU.mays[ix], r=leerPago(); if(!(r.monto>0)){ toast('Escribe el monto'); return; }
+  const { error } = await db.from('mayorista_pagos').insert({ mayorista_id:x.m.id, monto:r.monto, metodo:r.metodo, nota:r.nota, fecha:r.fecha, registrado_por:VENDEDOR });
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('✅ Pago de '+money(r.monto)+' registrado'); renderCuentas();
+}
+function entregaMayorista(ix){ const x=CU.mays[ix]; MAY_SEL=x.m.id; MODO='venta'; cart=[]; TIPO='mayorista'; go('vender'); toast('Elige las prendas para '+x.m.nombre); }
+function estadoCuentaMayorista(ix){
+  const x=CU.mays[ix];
+  const ent=x.ent.slice().reverse().map(e=>`#${e.folio} · ${fechaCorta(e.fecha)} · ${money(e.total)}\n${CU.itemsDe(e.id).map(CU.nomCorto).join('\n')}`).join('\n\n');
+  const pag=x.pag.slice().reverse().map(p=>`${fechaCorta(p.fecha)} · ${money(p.monto)}`).join('\n');
+  const msg=`Hola ${x.m.nombre} 👋 Este es tu estado de cuenta con Polos593:\n\n📦 ENTREGAS\n${ent||'—'}\n\n💵 PAGOS\n${pag||'—'}\n\nEntregado: ${money(x.tE)}\nPagado: ${money(x.tP)}\n*Saldo: ${money(x.saldo)}*`;
+  window.open('https://wa.me/'+String(x.m.telefono).replace(/\D/g,'').replace(/^0/,'593')+'?text='+encodeURIComponent(msg),'_blank');
+}
+function pagoProveedor(k){ const x=CU.provs[k]; formPago('💸 Pago a '+provNombre(k), 'Debes '+money(x.cargos-x.pagado), `guardarPagoProveedor('${k}')`); }
+async function guardarPagoProveedor(k){
+  const r=leerPago(); if(!(r.monto>0)){ toast('Escribe el monto'); return; }
+  const { error } = await db.from('proveedor_pagos').insert({ proveedor:k, monto:r.monto, nota:[r.metodo,r.nota].filter(Boolean).join(' · '), fecha:r.fecha, registrado_por:VENDEDOR });
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('✅ Pago a '+provNombre(k)+' registrado'); renderCuentas();
+}
+function detalleProveedor(k){
+  const x=CU.provs[k];
+  const lin=x.lineas.map(l=>`#${l.vt.folio} · ${fechaCorta(l.vt.fecha)} · ${l.vt.cliente_nombre||''}\n${l.ls.map(CU.nomCorto).join('\n')}${l.env?'\nEnvío '+money(l.env):''}\n= ${money(l.monto)}`).join('\n\n');
+  const ped=x.pedidos.map(o=>`Stock #${o.pd.folio} · ${fechaCorta(o.pd.fecha)}${o.pd.consignacion?' (envío consignación)':''} = ${money(o.monto)}`).join('\n');
+  const pag=x.pagos.map(p=>`${fechaCorta(p.fecha)} · ${money(p.monto)}`).join('\n');
+  const msg=`📋 LIQUIDACIÓN · ${provNombre(k)}\n\n${lin||'Sin ventas'}${ped?'\n\n📥 STOCK\n'+ped:''}${pag?'\n\n💸 PAGOS\n'+pag:''}\n\n*Total por pagar: ${money(x.cargos-x.pagado)}*`;
+  window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
 }
 
 // ════════════ VENDEDORES — programa de revendedores ════════════

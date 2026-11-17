@@ -201,7 +201,11 @@ const BAILEYS_URL = 'https://whatsapp-baileys-production-3e0b.up.railway.app';
 const ADMIN_NAMES = ['Homero'];          // quién ve Reportes e Inventario
 // Ventas del programa de vendedores ("Vend · Nombre" / "Kit · Nombre"): su comisión se paga en la
 // pestaña Vendedores, así que no cuentan como comisión de asesor.
-const sinComAsesor = n => ADMIN_NAMES.includes(n) || /^(Vend|Kit) · /.test(n||'');
+// Socios (17 nov 2026): Dani vende las gorras que compraron a medias con Homero. No cobra comisión: se reparten la ganancia.
+const SOCIOS = ['Dani'];
+// Vendedores que solo pueden vender ciertas prendas
+const SOLO_TIPOS = { 'Dani':['gorra_jinete'] };
+const sinComAsesor = n => ADMIN_NAMES.includes(n) || SOCIOS.includes(n) || /^(Vend|Kit) · /.test(n||'');
 let VENDEDOR = localStorage.getItem('p593_vendedor') || '';
 let ES_ADMIN = localStorage.getItem('p593_admin') === '1';
 let CONFIG = {};                          // pin, pin_admin, whatsapp_admin
@@ -413,6 +417,7 @@ function fotoPath(tipo,color){
   if(tipo==='camisa_hombre'||tipo==='camisa_mujer'){ const x=FOTO_OX[color]; return x?`camisa-prem-${tipo==='camisa_mujer'?'m':'h'}-${x}`:null; }
   if(tipo==='polo_pique'||tipo==='polo_pique_mujer'){ if(color==='Beige') return 'reales/2026-11/IMG_2381'; const n=FOTO_RL[color]; return n?`polo-rl-${n}`:null; }
   if(tipo==='polo_lacoste'){ const n=FOTO_LC[color]; return n?`polo-lc-${n}`:null; }
+  if(tipo==='gorra_jinete'){ const g={'Verde':'verde','Azul':'azul','Crema':'crema','Blanco':'blanco','Lila':'lila','Rosado':'rosado','Celeste':'celeste','Verde salvia':'salvia','Gris':'gris'}[color]; return g?`gorras/v2/gorra-${g}-1`:null; }
   if(tipo==='gorra'){ return ['Azul','Beige','Café','Celeste','Gris','Rojo','Vino'].includes(color)?`gorras/gorra-${slugColor(color)}-1`:null; }
   const l=FOTO_LISTA[tipo]; return (l && l[1].includes(color)) ? l[0]+slugColor(color) : null;
 }
@@ -424,11 +429,14 @@ function fotoHTML(tipo,color,cls){
 }
 const enTienda = p => Math.max(0,+p.stock||0);   // nunca mostrar stock negativo
 // Etiqueta/ícono de un tipo: si no está en los mapas, usa el nombre del producto (así un tipo nuevo no sale en crudo)
+// Gorra del jinete (17 nov 2026): producción propia con Dani, costo $3,25, precio $12 (por mayor $8 con "$ Precio final")
+Object.assign(PRENDA_LABEL,{gorra_jinete:'Gorra Jinete'}); Object.assign(PRENDA_ICON,{gorra_jinete:'🧢',gorra:'🧢'});
+Object.assign(COLOR_HEX,{'Verde':'#2F6E4E','Azul':'#5A6684','Crema':'#EFE6CC','Lila':'#B4ADD8','Verde salvia':'#85938C','Gris':'#6F706F'});
 const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)||{}).nombre) || t;
 const prendaIcon  = t => PRENDA_ICON[t] || (String(t).startsWith('liq_') ? '🏷️' : '👕');
 const TALLA_ORDER=['XS','S','M','L','XL','2XL','3XL'];
 
-const prodsGenero = g => productosCache.filter(p => (p.genero===g || p.genero==='unisex') && !(MODO==='stock' && String(p.tipo).startsWith('liq_')));
+const prodsGenero = g => productosCache.filter(p => (p.genero===g || p.genero==='unisex') && !(MODO==='stock' && String(p.tipo).startsWith('liq_')) && (!SOLO_TIPOS[VENDEDOR] || SOLO_TIPOS[VENDEDOR].includes(p.tipo)));
 function pickGenero(g){ SEL={genero:g,prenda:null,color:null}; renderWizard(); }
 function pickPrenda(t){ SEL.prenda=t; SEL.color=null; renderWizard(); }
 function pickColor(c){ SEL.color=c; renderWizard(); }

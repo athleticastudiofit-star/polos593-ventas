@@ -1127,7 +1127,7 @@ async function renderReportes(){
   const codCob=ventasCob.filter(x=>x.tipo==='contraentrega');
   const porDia={}, porVend={};
   ventasCob.forEach(x=>{
-    const d=x.fecha.slice(0,10); porDia[d]=porDia[d]||{n:0,ing:0,gan:0}; porDia[d].n++; porDia[d].ing+=+x.total; porDia[d].gan+=+x.ganancia;
+    const d=fmtFecha(new Date(x.fecha)); porDia[d]=porDia[d]||{n:0,ing:0,gan:0}; porDia[d].n++; porDia[d].ing+=+x.total; porDia[d].gan+=+x.ganancia;
     const k=x.vendedor||'—'; porVend[k]=porVend[k]||{n:0,gan:0}; porVend[k].n++; porVend[k].gan+=+x.ganancia;
   });
   const dias=Object.entries(porDia).sort((a,b)=>b[0].localeCompare(a[0]));
@@ -1138,7 +1138,7 @@ async function renderReportes(){
   const devs=devsData||[];
   const devMonto=devs.reduce((s,d)=>s+(+d.monto||0),0);
   const devUnid=devs.reduce((s,d)=>s+((Array.isArray(d.items)?d.items:[]).reduce((a,i)=>a+(+i.cantidad||0),0)),0);
-  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda');
+  const corto=n=>(n||'').replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Camisa Rayada Polo Ralph Lauren','Camisa rayada').replace('Polo Piqué Ralph Lauren','Polo piqué').replace('Cuello Redondo','Redonda');
 
   v.innerHTML = `
     <h2 class="page">Reportes</h2>
@@ -1158,6 +1158,22 @@ async function renderReportes(){
       <div class="kpi"><div class="l">Ingresos</div><div class="v">${money(ingresos)}</div></div>
       <div class="kpi"><div class="l">Ganancia</div><div class="v gain">${money(ganancia)}</div></div>
       <div class="kpi"><div class="l">Descuentos dados</div><div class="v" style="color:var(--red);font-size:20px">${money(descuentos)}</div></div>
+    </div>
+    <div class="card">
+      <b>🧾 Qué se vendió</b> <span class="muted" style="font-size:12px">— toca una venta para ver todo (cliente, dirección, comisión)</span>
+      ${ventas.length===0?'<div class="empty">Sin ventas en este rango</div>':ventas.slice(0,60).map(x=>{
+        const its=itemsByVenta[x.id]||[];
+        const unaDia = fmtFecha(REP_DESDE)===fmtFecha(REP_HASTA);
+        const cuando = new Date(x.fecha).toLocaleString('es-EC', unaDia?{hour:'2-digit',minute:'2-digit'}:{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+        return `<div onclick="verVenta('${x.id}')" style="cursor:pointer;padding:.55rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:baseline">
+            <span><b>#${x.folio}</b> <span class="badge ${TIPO_BADGE(x.tipo)[0]}">${TIPO_BADGE(x.tipo)[2]}</span>${x.zona_envio==='entrega_quito'?' 🛵':''}${x.tipo==='contraentrega'&&!COD_COBRADO(x)?' <small class="muted">en tránsito</small>':''} <small class="muted">${cuando} · ${x.vendedor||'—'}</small></span>
+            <b>${money(x.total)}</b>
+          </div>
+          <div style="font-size:13px;margin-top:.2rem">${its.map(i=>`${i.cantidad}× ${corto(i.nombre)}${colorBySku[i.sku]?' '+colorBySku[i.sku]:''} <b>${i.talla||''}</b>`).join(' · ')||'<span class="muted">sin prendas registradas</span>'}</div>
+          ${[x.cliente_nombre,x.ciudad].filter(Boolean).length?`<div class="muted" style="font-size:12px">${[x.cliente_nombre,x.ciudad].filter(Boolean).join(' · ')}${ES_ADMIN?` · ganancia <span class="gain">${money(x.ganancia)}</span>`:''}</div>`:''}
+        </div>`; }).join('')}
+      ${ventas.length>60?`<div class="muted" style="font-size:12px;margin-top:.4rem">… y ${ventas.length-60} más. Achica el rango de fechas para verlas.</div>`:''}
     </div>
     <div class="card">
       <b>Por canal</b>
@@ -1217,18 +1233,6 @@ async function renderReportes(){
         </div>`).join('')}
       </div>
       ${topTalla.length?`<div style="margin-top:.7rem;font-size:12px;color:var(--soft)">Tallas más vendidas: ${topTalla.map(([t,n])=>`<b style="color:var(--text)">${t}</b> ${n}`).join(' · ')}</div>`:''}
-    </div>
-    <div class="card">
-      <b>Ventas del rango</b> <span class="muted" style="font-size:12px">— toca una para ver el detalle</span>
-      <table style="margin-top:.5rem"><thead><tr><th>#</th><th>Tipo</th><th>Vendedor</th><th>Total</th><th>Gan.</th></tr></thead><tbody>
-      ${ventas.slice(0,40).map(x=>`<tr onclick="verVenta('${x.id}')" style="cursor:pointer">
-        <td>${x.folio}</td>
-        <td><span class="badge ${TIPO_BADGE(x.tipo)[0]}">${TIPO_BADGE(x.tipo)[2]}</span>${x.zona_envio==='entrega_quito'?' 🛵':''}${x.tipo==='contraentrega'&&!COD_COBRADO(x)?' <small class="muted">en tránsito</small>':''}</td>
-        <td>${x.vendedor||'—'}</td>
-        <td>${money(x.total)}</td>
-        <td class="gain">${money(x.ganancia)}</td>
-      </tr>`).join('')||'<tr><td colspan=5 class="empty">Sin ventas</td></tr>'}
-      </tbody></table>
     </div>
   `;
 }
@@ -1302,7 +1306,7 @@ function verVenta(id){
     ${v.tipo!=='local'&&v.notas?`<div style="font-size:13px;margin-bottom:.6rem">🏠 <b>Dirección:</b> ${v.notas}</div>`:''}
     ${v.tipo==='contraentrega'?`<div style="font-size:13px;margin-bottom:.6rem">🚚 <b>Pardux:</b> ${(EST_ENVIO[v.estado_envio]||EST_ENVIO.por_despachar).txt}${v.guia_envio?` · guía <b>${v.guia_envio}</b>`:''}${v.tracking_url?` · <a href="${v.tracking_url}" target="_blank" rel="noopener" style="color:var(--gold)">seguimiento ↗</a>`:''}</div>`:''}
     <div style="border-top:1px solid var(--border);padding-top:.5rem">
-    ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Cuello Redondo','Redonda')} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
+    ${its.map(i=>`<div class="totline"><span>${i.cantidad}x ${i.nombre.replace('Camisa Manga Larga Polo Ralph Lauren','Camisa').replace('Camisa Rayada Polo Ralph Lauren','Camisa rayada').replace('Cuello Redondo','Redonda')}${((productosCache.find(p=>p.sku===i.sku)||{}).color)?' '+productosCache.find(p=>p.sku===i.sku).color:''} ${i.talla||''}</span><span>${money(i.precio_unit*i.cantidad)}</span></div>`).join('')||'<div class="muted">Sin items</div>'}
     </div>
     ${v.descuento_monto>0?`<div class="totline" style="color:var(--red)"><span>Descuento</span><span>-${money(v.descuento_monto)}</span></div>`:''}
     ${v.descuento_monto<0?`<div class="totline"><span>Ajuste por precio final</span><span>+${money(-v.descuento_monto)}</span></div>`:''}

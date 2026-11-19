@@ -2003,7 +2003,7 @@ async function renderSocios(){
     <h2 class="page" style="margin-top:1.2rem">Ventas desde el corte</h2>
     ${ventas.length?`<div class="card" style="padding:.4rem .8rem">${ventas.map(x=>`<div style="padding:.45rem 0;border-bottom:1px solid var(--border);font-size:13px"><div class="row" style="justify-content:space-between"><b>#${x.folio} · ${x.cliente_nombre||'Cliente'}</b><b>${money(x.monto)}</b></div><div class="muted" style="font-size:12px">${fechaCorta(x.fecha)} · ${x.vendedor} · ${x.its.map(i=>`${i.cantidad>1?i.cantidad+'x ':''}${(productosCache.find(p=>p.sku===i.sku)||{}).color||i.sku}`).join(', ')}</div></div>`).join('')}</div>`:'<div class="empty" style="padding:1rem">Aún no hay ventas desde el corte. Se registran en Vender → Gorra Jinete.</div>'}
     <h2 class="page" style="margin-top:1.2rem">Gastos e inversiones</h2>
-    ${gastos.length?`<div class="card" style="padding:.4rem .8rem">${gastos.map(g=>`<div style="padding:.45rem 0;border-bottom:1px solid var(--border);font-size:13px"><div class="row" style="justify-content:space-between"><b>${g.concepto}</b><b>${money(g.monto)}</b></div><div class="muted" style="font-size:12px">${fechaCorta(g.fecha)} · ${g.tipo==='produccion'?'Producción':'Gasto'} · pagó ${g.pagado_por==='Caja'?'la caja de la sociedad':g.pagado_por}${g.nota?' · '+g.nota:''} · anotó ${g.registrado_por||''}</div></div>`).join('')}</div>`:'<div class="empty" style="padding:1rem">Aún no hay gastos desde el corte.</div>'}
+    ${gastos.length?`<div class="card" style="padding:.4rem .8rem"><div class="muted" style="font-size:12px;padding:.3rem 0">Toca un gasto para corregirlo o borrarlo.</div>${gastos.map(g=>`<div onclick="editarGastoSoc('${g.id}')" style="cursor:pointer;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:13px"><div class="row" style="justify-content:space-between"><b>${g.concepto} <span class="muted" style="font-weight:400">✏️</span></b><b>${money(g.monto)}</b></div><div class="muted" style="font-size:12px">${fechaCorta(g.fecha)} · ${g.tipo==='produccion'?'Producción':'Gasto'} · pagó ${g.pagado_por==='Caja'?'la caja de la sociedad':g.pagado_por}${g.nota?' · '+g.nota:''} · anotó ${g.registrado_por||''}</div></div>`).join('')}</div>`:'<div class="empty" style="padding:1rem">Aún no hay gastos desde el corte.</div>'}
     <h2 class="page" style="margin-top:1.2rem">Stock</h2>
     <div class="card">${stock.length?stock.map(p=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:.2rem 0"><span>${p.color}</span><b>${p.stock}</b></div>`).join(''):'<span class="muted" style="font-size:13px">No hay gorras cargadas en el sistema. Ingrésalas con 📥 Ingresar gorras.</span>'}
       ${(peds||[]).length?`<div class="muted" style="font-size:12px;margin-top:.5rem">Últimos ingresos: ${(peds||[]).slice(0,5).map(p=>`#${p.folio} ${fechaCorta(p.fecha)} (${p.estado==='recibido'?'llegó':'en camino'})`).join(' · ')}</div>`:''}</div>
@@ -2031,6 +2031,40 @@ async function guardarGastoSoc(){
     nota:(document.getElementById('sg-nota').value||'').trim()||null, fecha: esHoy?new Date().toISOString():new Date(f+'T12:00:00').toISOString(), registrado_por:VENDEDOR });
   if(error){ toast('Error: '+error.message); return; }
   closeModal(); toast('✅ Gasto guardado'); renderSocios();
+}
+function editarGastoSoc(id){
+  const g=((SOC&&SOC.gastos)||[]).find(x=>x.id===id); if(!g) return;
+  const esc=t=>String(t??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  SG_TIPO=g.tipo==='produccion'?'produccion':'gasto';
+  const fecha=fechaInput(new Date(g.fecha));
+  showModal(`<h3 style="margin:0 0 .3rem">✏️ Corregir gasto</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:.6rem">Anotado por ${esc(g.registrado_por||'—')}</div>
+    <div class="seg" style="margin-bottom:.5rem"><button id="sg-t-g" class="${SG_TIPO==='gasto'?'on':''}" onclick="SG_TIPO='gasto';this.classList.add('on');document.getElementById('sg-t-p').classList.remove('on')">Gasto</button><button id="sg-t-p" class="${SG_TIPO==='produccion'?'on':''}" onclick="SG_TIPO='produccion';this.classList.add('on');document.getElementById('sg-t-g').classList.remove('on')">Producción de gorras</button></div>
+    <input class="fld" id="sg-con" value="${esc(g.concepto)}" placeholder="¿En qué?" style="margin-bottom:.5rem">
+    <div class="grid2" style="margin-bottom:.5rem"><input class="fld" id="sg-monto" type="number" step="0.01" min="0" value="${(+g.monto).toFixed(2)}"><input class="fld" id="sg-fecha" type="date" value="${fecha}" max="${fechaInput(new Date())}"></div>
+    <label class="lbl">¿Quién lo pagó?</label>
+    <select class="fld" id="sg-quien" style="margin-bottom:.5rem"><option ${g.pagado_por==='Dani'?'selected':''}>Dani</option><option ${g.pagado_por==='Homero'?'selected':''}>Homero</option><option value="Caja" ${g.pagado_por==='Caja'?'selected':''}>Caja de la sociedad (dinero de las ventas)</option></select>
+    <input class="fld" id="sg-nota" value="${esc(g.nota||'')}" placeholder="Nota (opcional)" style="margin-bottom:.7rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="guardarEdicionGastoSoc('${g.id}','${fecha}')">Guardar cambios</button>
+    <button class="btn" style="width:100%;margin-top:.5rem;background:var(--red);color:#fff" onclick="eliminarGastoSoc('${g.id}')">🗑️ Eliminar este gasto</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="closeModal()">Cancelar</button>`);
+}
+async function guardarEdicionGastoSoc(id, fechaAntes){
+  const concepto=(document.getElementById('sg-con').value||'').trim(), monto=Math.round((parseFloat(document.getElementById('sg-monto').value)||0)*100)/100;
+  if(!concepto||!(monto>0)){ toast('Escribe en qué y el monto'); return; }
+  const f=document.getElementById('sg-fecha').value;
+  const cambios={ tipo:SG_TIPO, concepto, monto, pagado_por:document.getElementById('sg-quien').value, nota:(document.getElementById('sg-nota').value||'').trim()||null };
+  if(f && f!==fechaAntes) cambios.fecha=new Date(f+'T12:00:00').toISOString();
+  const { error } = await db.from('soc_movimientos').update(cambios).eq('id',id);
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('✅ Gasto corregido'); renderSocios();
+}
+async function eliminarGastoSoc(id){
+  const g=((SOC&&SOC.gastos)||[]).find(x=>x.id===id); if(!g) return;
+  if(!confirm(`¿Eliminar el gasto "${g.concepto}" de ${money(g.monto)}? No se puede deshacer.`)) return;
+  const { error } = await db.from('soc_movimientos').delete().eq('id',id);
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('🗑️ Gasto eliminado'); renderSocios();
 }
 async function pagoCierreSoc(){
   let cfg={}; try{ cfg=JSON.parse(CONFIG.soc_gorras||'{}'); }catch(e){}

@@ -453,7 +453,9 @@ function fotoPath(tipo,color){
   if(tipo==='polo_pique'||tipo==='polo_pique_mujer'){ if(color==='Beige') return 'reales/2026-11/IMG_2381'; const n=FOTO_RL[color]; return n?`polo-rl-${n}`:null; }
   if(tipo==='polo_lacoste'){ const n=FOTO_LC[color]; return n?`polo-lc-${n}`:null; }
   if(tipo==='perfume'){ const p=productosCache.find(x=>x.tipo==='perfume'&&x.color===color); return p?`perfumes/perfume-${p.sku.slice(3)}-1`:null; }
-  if(tipo==='gorra_jinete'){ const g={'Verde':'verde','Azul':'azul','Crema':'crema','Blanco':'blanco','Lila':'lila','Rosado':'rosado','Celeste':'celeste','Verde salvia':'salvia','Gris':'gris'}[color]; return g?`gorras/v2/gorra-${g}-1`:null; }
+  if(tipo==='gorra_jinete'){ const g={'Verde':'verde','Azul':'azul','Crema':'crema','Blanco':'blanco','Lila':'lila','Rosado':'rosado','Celeste':'celeste','Verde salvia':'salvia','Gris':'gris'}[color]; if(g) return `gorras/v2/gorra-${g}-1`;
+    const o={'Vino':'vino','Café osito':'cafe','Celeste osito':'celeste','Gris osito':'gris','Beige':'beige','Rojo':'rojo','Azul osito':'azul','Azul logo rojo':'v2/gorra-azul-logo-rojo','Café logo beige':'v2/gorra-cafe-logo-beige'}[color];
+    return o ? (o.startsWith('v2/')?`gorras/${o}-1`:`gorras/gorra-${o}-1`) : null; }
   if(tipo==='gorra'){ return ['Azul','Beige','Café','Celeste','Gris','Rojo','Vino'].includes(color)?`gorras/gorra-${slugColor(color)}-1`:null; }
   const l=FOTO_LISTA[tipo]; return (l && l[1].includes(color)) ? l[0]+slugColor(color) : null;
 }
@@ -468,6 +470,7 @@ const enTienda = p => Math.max(0,+p.stock||0);   // nunca mostrar stock negativo
 // Gorra del jinete (17 nov 2026): producción propia con Dani, costo $3,25, precio $12 (por mayor $8 con "$ Precio final")
 Object.assign(PRENDA_LABEL,{gorra_jinete:'Gorra Jinete'}); Object.assign(PRENDA_ICON,{gorra_jinete:'🧢',gorra:'🧢'});
 Object.assign(COLOR_HEX,{'Verde':'#2F6E4E','Azul':'#5A6684','Crema':'#EFE6CC','Lila':'#B4ADD8','Verde salvia':'#85938C','Gris':'#6F706F'});
+Object.assign(COLOR_HEX,{'Café osito':'#42322E','Celeste osito':'#989D9D','Gris osito':'#4F5050','Azul osito':'#41485A','Azul logo rojo':'#1F2A4A','Café logo beige':'#5A3E2B'});
 // Perfumes (17 nov 2026): proveedor aparte, en consignación en la tienda o dropshipping. El "color" es el nombre del perfume.
 Object.assign(PRENDA_LABEL,{perfume:'Perfume'}); Object.assign(PRENDA_ICON,{perfume:'🧴'});
 const prendaLabel = t => PRENDA_LABEL[t] || ((productosCache.find(p=>p.tipo===t)||{}).nombre) || t;
@@ -478,6 +481,40 @@ const prodsGenero = g => productosCache.filter(p => (p.genero===g || p.genero===
 function pickGenero(g){ SEL={genero:g,prenda:null,color:null}; renderWizard(); }
 function pickPrenda(t){ SEL.prenda=t; SEL.color=null; renderWizard(); }
 function pickColor(c){ SEL.color=c; renderWizard(); }
+// Color nuevo desde el ingreso de mercadería (19 nov 2026): crea el producto con stock 0 copiando precio/costo/tallas del mismo tipo.
+function nuevoColorModal(){
+  showModal(`<h3 style="margin:0 0 .4rem">➕ Color nuevo · ${prendaLabel(SEL.prenda)}</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:.6rem">Escribe el color como lo van a reconocer (ej: Azul logo rojo). Se crea con el mismo precio y costo de las otras; la foto se agrega después.</div>
+    <input class="fld" id="nc-color" placeholder="Ej: Café logo beige" style="margin-bottom:.7rem">
+    <button class="btn btn-green" style="width:100%;padding:.8rem" onclick="crearColorNuevo()">Crear color</button>
+    <button class="btn btn-ghost" style="width:100%;margin-top:.5rem" onclick="closeModal()">Cancelar</button>`);
+  setTimeout(()=>{ const i=document.getElementById('nc-color'); if(i) i.focus(); },50);
+}
+async function crearColorNuevo(){
+  let color=(document.getElementById('nc-color').value||'').trim().replace(/\s+/g,' ');
+  if(color.length<3){ toast('Escribe el nombre del color'); return; }
+  color=color.charAt(0).toUpperCase()+color.slice(1);
+  const base=productosCache.filter(p=>p.tipo===SEL.prenda);
+  if(!base.length){ toast('No hay productos base de esta prenda'); return; }
+  if(base.some(p=>p.color.toLowerCase()===color.toLowerCase())){ closeModal(); pickColor(base.find(p=>p.color.toLowerCase()===color.toLowerCase()).color); return; }
+  const limpio=t=>t.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z ]/g,'');
+  const pal=limpio(color).split(' ').filter(Boolean);
+  let cod=(pal[0]||'X').slice(0,3)+pal.slice(1).filter(w=>!['DE','CON','Y','LOGO'].includes(w)).map(w=>w[0]).join('');
+  const pref=String(base[0].sku).split('-')[0];
+  const tallas=[...new Set(base.map(p=>p.talla))];
+  const filas=[]; let n=1, sku0;
+  const existe=k=>productosCache.some(p=>p.sku===k);
+  while(tallas.some(t=>existe(`${pref}-${cod}${n>1?n:''}-${String(t).slice(0,3).toUpperCase()==='ÚNI'?'U':t}`))) n++;
+  if(n>1) cod=cod+n;
+  for(const t of tallas){
+    const m=base.find(p=>p.talla===t);
+    const sku=`${pref}-${cod}-${String(t).toUpperCase().startsWith('ÚNI')||String(t).toUpperCase().startsWith('UNI')?'U':t}`; sku0=sku0||sku;
+    filas.push({sku, tipo:m.tipo, nombre:m.nombre, genero:m.genero, color, talla:t, costo:m.costo, precio_venta:m.precio_venta, stock:0, activo:true});
+  }
+  const { error } = await db.from('productos').insert(filas);
+  if(error){ toast('Error: '+error.message); return; }
+  await loadProductos(); closeModal(); toast('✅ Color creado: '+color); pickColor(color);
+}
 function pickTalla(sku){ addCart(sku); SEL={genero:SEL.genero,prenda:null,color:null}; toast('✓ Agregado al carrito'); renderWizard(); }
 function wizardBack(){ if(SEL.color) SEL.color=null; else if(SEL.prenda) SEL.prenda=null; else SEL.genero=null; renderWizard(); }
 
@@ -503,7 +540,8 @@ function renderWizard(){
     const grid=l=>`<div class="wz-grid" style="grid-template-columns:1fr 1fr 1fr">${l.map(card).join('')}</div>`;
     body=`<div class="wz-step">¿Qué color? <span class="muted" style="font-size:13px;font-weight:400">· mira la foto</span></div>`
       + (hay.length?`<div class="wz-sec ok">✓ En la tienda</div>${grid(hay)}`:'')
-      + (noHay.length?`<div class="wz-sec">${hay.length?'Otros colores · solo bajo pedido':'Bajo pedido · no hay en tienda'}</div>${grid(noHay)}`:'');
+      + (noHay.length?`<div class="wz-sec">${hay.length?'Otros colores · solo bajo pedido':'Bajo pedido · no hay en tienda'}</div>${grid(noHay)}`:'')
+      + (MODO==='stock' && (SEL.prenda==='gorra_jinete' || ES_ADMIN) ? `<button class="btn btn-ghost" style="width:100%;margin-top:.7rem;padding:.8rem" onclick="nuevoColorModal()">➕ Color nuevo (no está en la lista)</button>` : '');
   } else {
     const opts=prodsGenero(SEL.genero).filter(p=>p.tipo===SEL.prenda && p.color===SEL.color).sort((a,b)=>TALLA_ORDER.indexOf(a.talla)-TALLA_ORDER.indexOf(b.talla));
     const precio=opts[0]?(+opts[0].precio_venta>0?money(opts[0].precio_venta):'🏷️ liquidación: el precio se pone en "$ Precio final"'):'';

@@ -1988,16 +1988,27 @@ async function renderSocios(){
     </div>
     <div class="card">
       <b>Balance de los socios</b>
-      <div class="muted" style="font-size:12px;margin:.2rem 0 .5rem">El fondo (${money(fondo)}) es mitad de cada uno y lo guarda ${cfg.lo_tiene||'Homero'} para la próxima producción. Aquí se cuadra lo que pasó desde el corte: a cada uno le toca lo que puso de su bolsillo + mitad de la ganancia.</div>
+      <div class="muted" style="font-size:12px;margin:.2rem 0 .5rem">Inversión inicial: ${money(fondo)} el ${fechaCorta(desde)} (mitad de cada uno, ya igualados). Quedó en la caja, la guarda ${cfg.lo_tiene||'Homero'}, y desde ahí se trabaja. A cada uno le toca su mitad de la inversión + lo que puso de su bolsillo + mitad del resultado.</div>
       <table style="width:100%;font-size:13px;border-collapse:collapse">
         <tr class="muted"><td></td><td style="text-align:right">Dani</td><td style="text-align:right">Homero</td></tr>
-        <tr><td>Fondo (mitad c/u)</td><td style="text-align:right">${money(fondo/2)}</td><td style="text-align:right">${money(fondo/2)}</td></tr>
+        <tr><td>Inversión inicial ${fechaCorta(desde)} (mitad c/u)</td><td style="text-align:right">${money(fondo/2)}</td><td style="text-align:right">${money(fondo/2)}</td></tr>
         <tr><td>Gastos que pagó de su bolsillo</td><td style="text-align:right">${money(gDani)}</td><td style="text-align:right">${money(gHom)}</td></tr>
-        <tr><td>Mitad de la ganancia</td><td style="text-align:right">${money(ganancia/2)}</td><td style="text-align:right">${money(ganancia/2)}</td></tr>
-        <tr style="font-weight:700"><td>Le toca cobrar</td><td style="text-align:right">${money(gDani+ganancia/2)}</td><td style="text-align:right">${money(gHom+ganancia/2)}</td></tr>
-        <tr class="muted"><td>Ya cobró de las ventas</td><td style="text-align:right">${money(vDani)}</td><td style="text-align:right">${money(vOtros-gCaja)}</td></tr>
+        <tr><td>Mitad del resultado <small class="muted">(ventas − gastos)</small></td><td style="text-align:right">${money(ganancia/2)}</td><td style="text-align:right">${money(ganancia/2)}</td></tr>
+        <tr style="font-weight:700;border-top:1px solid var(--border)"><td>Su parte de la caja</td><td style="text-align:right">${money(fondo/2+gDani+ganancia/2)}</td><td style="text-align:right">${money(fondo/2+gHom+ganancia/2)}</td></tr>
       </table>
-      ${(()=>{ const d=Math.round((gDani+ganancia/2-vDani)*100)/100; return Math.abs(d)<0.01?'<div style="margin-top:.5rem;color:var(--green)">✓ Están iguales</div>':`<div style="margin-top:.5rem">Para quedar iguales: <b>${d>0?'Homero le pasa a Dani':'Dani le pasa a Homero'} ${money(Math.abs(d))}</b></div>`; })()}
+      <div style="margin-top:.5rem;font-size:13px">Las dos partes suman la caja (${money(caja)}), que la tiene ${cfg.lo_tiene||'Homero'}${vDani>0?`; Dani tiene en mano ${money(vDani)} de sus ventas`:''}. ${Math.abs(gDani-gHom)<0.01&&vDani===0?'<span style="color:var(--green)">✓ Están iguales: nadie le debe a nadie.</span>':`Si hoy se reparte, a Dani le tocan ${money(fondo/2+gDani+ganancia/2)}${vDani>0?` (ya tiene ${money(vDani)})`:''} y a Homero ${money(fondo/2+gHom+ganancia/2)}.`}</div>
+      ${ganancia<0?'<div class="muted" style="font-size:11px;margin-top:.3rem">El resultado sale en negativo porque la producción nueva cuenta como gasto hasta que se vendan esas gorras.</div>':''}
+      ${(()=>{
+        const ev=[{f:desde,t:'Inversión inicial (queda en caja, mitad de cada uno)',caja:fondo}];
+        ventas.forEach(x=>ev.push({f:x.fecha,t:`Venta #${x.folio} · ${x.uds} gorra${x.uds>1?'s':''} · ${x.vendedor||''}`,caja:x.monto}));
+        gastos.forEach(g=>ev.push({f:g.fecha,t:`${g.tipo==='produccion'?'Producción':'Gasto'}: ${g.concepto}`+(g.pagado_por==='Caja'?'':` (pagó ${g.pagado_por} de su bolsillo)`),caja:g.pagado_por==='Caja'?-g.monto:0,fuera:g.pagado_por==='Caja'?0:g.monto}));
+        pagosSocio.forEach(m=>ev.push({f:m.fecha,t:`Pago entre socios: ${m.pagado_por} ${m.nota||''} · ${m.concepto}`,caja:0,fuera:m.monto}));
+        ev.sort((a,b)=>new Date(a.f)-new Date(b.f));
+        let saldo=0;
+        const filas=ev.map(e=>{ saldo+=e.caja; return `<tr style="border-top:1px solid var(--border)"><td style="white-space:nowrap;vertical-align:top;padding:.3rem .4rem .3rem 0">${fechaCorta(e.f)}</td><td style="padding:.3rem .3rem">${e.t}</td><td style="text-align:right;white-space:nowrap;vertical-align:top;padding:.3rem 0;color:${e.caja>0?'var(--green)':e.caja<0?'var(--red)':'var(--soft)'}">${e.caja?(e.caja>0?'+':'−')+money(Math.abs(e.caja)):money(e.fuera||0)}</td><td style="text-align:right;white-space:nowrap;vertical-align:top;padding:.3rem 0 .3rem .4rem;font-weight:600">${money(saldo)}</td></tr>`; }).join('');
+        return `<div style="margin-top:.9rem"><b style="font-size:13px">Movimientos con fecha</b> <span class="muted" style="font-size:11px">— en gris: fuera de la caja</span>
+          <table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:.3rem"><tr class="muted"><td>Fecha</td><td>Movimiento</td><td style="text-align:right">Monto</td><td style="text-align:right">Caja</td></tr>${filas}</table></div>`;
+      })()}
       ${pend&&!pendPagado?`<div style="margin-top:.5rem;font-size:12px;color:var(--yellow)">Pendiente del cierre del ${fechaCorta(desde)}: ${pend.de} le paga ${money(pend.monto)} a ${pend.a}. <a href="#" onclick="pagoCierreSoc();return false" style="color:var(--gold)">Marcar como pagado</a></div>`:''}
     </div>
     <h2 class="page" style="margin-top:1.2rem">Ventas desde el corte</h2>

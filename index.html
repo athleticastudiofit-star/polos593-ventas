@@ -294,9 +294,21 @@ function go(tab){
   if(tab==='socios') renderSocios();
 }
 
+// Supabase devuelve máximo 1000 filas por consulta: se piden por páginas (24 nov 2026, ya había 1088 productos).
+// `armar` recibe la consulta base y le pone filtros/orden; siempre se desempata por sku para que ninguna página repita o salte filas.
+async function traerProductos(armar){
+  const PAG=1000; let todo=[];
+  for(let i=0;;i+=PAG){
+    const { data, error } = await armar(db.from('productos').select('*')).order('sku').range(i,i+PAG-1);
+    if(error) return { data:null, error };
+    todo=todo.concat(data||[]);
+    if((data||[]).length<PAG) return { data:todo, error:null };
+  }
+}
 async function loadProductos(){
-  const { data } = await db.from('productos').select('*').eq('activo',true).order('nombre');
-  productosCache = data||[];
+  const { data, error } = await traerProductos(q=>q.eq('activo',true).order('nombre'));
+  if(error){ toast('No se pudo cargar el catálogo: '+error.message); return productosCache; }  // se conserva lo que ya había
+  productosCache = data;
   return productosCache;
 }
 
@@ -1065,7 +1077,7 @@ async function cambiarEstadoEnvio(id, nuevo){
 async function renderInventario(){
   const v=document.getElementById('view');
   v.innerHTML='<div class="empty">Cargando inventario…</div>';
-  const { data } = await db.from('productos').select('*').order('tipo').order('color').order('talla');
+  const { data } = await traerProductos(q=>q.order('tipo').order('color').order('talla'));
   const prods=data||[];
   const totalUnid = prods.reduce((s,p)=>s+(p.stock||0),0);
   const valorStock = prods.reduce((s,p)=>s+(p.stock||0)*(+p.costo||0),0);

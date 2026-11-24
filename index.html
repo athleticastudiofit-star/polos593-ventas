@@ -431,6 +431,10 @@ Object.assign(PRENDA_ICON,{polo_pique_mujer:'🎽'});
 Object.assign(PRENDA_LABEL,{polo_tommy:'Polo Piqué Tommy',polo_tommy_mujer:'Polo Piqué Tommy'});
 Object.assign(PRENDA_ICON,{polo_tommy:'🎽',polo_tommy_mujer:'🎽'});
 Object.assign(COLOR_HEX,{'Coral':'#E26254'});
+// Bermuda Polo Ralph Lauren (24 nov 2026): solo en el POS por ahora (sin fotos); mismos colores, tallas y precio que la Lacoste
+Object.assign(PRENDA_LABEL,{bermuda_hombre:'Bermuda Lacoste',bermuda_polo:'Bermuda Polo RL'});
+Object.assign(PRENDA_ICON,{bermuda_hombre:'🩳',bermuda_polo:'🩳'});
+if(!COLOR_HEX['Camel']) COLOR_HEX['Camel']='#C19A6B';
 // Camisa rayada de mujer (2 oct 2026): 11 colores, mismo costo/precio que la de hombre ($22 / $39.90)
 Object.assign(PRENDA_LABEL,{camisa_rayada_mujer:'Camisa Rayada',camisa_rayada_hombre:'Camisa Rayada'});
 Object.assign(PRENDA_ICON,{camisa_rayada_mujer:'👔',camisa_rayada_hombre:'👔'});
@@ -456,7 +460,7 @@ function fotoPath(tipo,color){
   if(tipo==='camisa_hombre'||tipo==='camisa_mujer'){ const x=FOTO_OX[color]; return x?`camisa-prem-${tipo==='camisa_mujer'?'m':'h'}-${x}`:null; }
   if(tipo==='polo_pique'||tipo==='polo_pique_mujer'){ if(color==='Beige') return 'reales/2026-11/IMG_2381'; const n=FOTO_RL[color]; return n?`polo-rl-${n}`:null; }
   if(tipo==='polo_tommy'){ const x={'Beige':'beige','Rosa Pastel':'rosado','Celeste Claro':'celeste'}[color]; return x?`tommy/polo-tommy-h-${x}`:null; }
-  if(tipo==='polo_tommy_mujer') return ['Azul Marino','Coral','Celeste','Verde Oliva','Verde','Rojo','Blanco','Negro','Rosado'].includes(color)?`tommy/polo-tommy-m-${slugColor(color)}`:null;
+  if(tipo==='polo_tommy_mujer') return ['Azul Marino','Coral','Celeste','Verde Oliva','Verde','Rojo','Blanco','Negro','Rosado','Amarillo'].includes(color)?`tommy/polo-tommy-m-${slugColor(color)}`:null;
   if(tipo==='polo_lacoste'){ const n=FOTO_LC[color]; return n?`polo-lc-${n}`:null; }
   if(tipo==='perfume'){ const p=productosCache.find(x=>x.tipo==='perfume'&&x.color===color); return p?`perfumes/perfume-${p.sku.slice(3)}-1`:null; }
   if(tipo==='gorra_jinete'){ const g={'Verde':'verde','Azul':'azul','Crema':'crema','Blanco':'blanco','Lila':'lila','Rosado':'rosado','Celeste':'celeste','Verde salvia':'salvia','Gris':'gris'}[color]; if(g) return `gorras/v2/gorra-${g}-1`;
